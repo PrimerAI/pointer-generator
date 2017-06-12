@@ -1,0 +1,2 @@
+data/* filter=bigstore-compress
+data/chunked/* filter=bigstore-compress
