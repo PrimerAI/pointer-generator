@@ -79,7 +79,7 @@ class Hypothesis(object):
 
   @property
   def avg_top_attn(self):
-      return sum(attn_dist.max() for attn_dist in self.attn_dists) / len(self.attn_dists)
+      return sum(max(attn_dist) for attn_dist in self.attn_dists) / len(self.attn_dists)
 
 
 def run_beam_search(sess, model, vocab, batch):
