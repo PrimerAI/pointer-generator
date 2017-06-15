@@ -77,7 +77,7 @@ class Hypothesis(object):
     # normalize log probability by number of tokens (otherwise longer sequences always have lower probability)
     return self.log_prob / len(self.tokens)
 
-  @@property
+  @property
   def avg_top_attn(self):
       return sum(attn_dist.max() for attn_dist in self.attn_dists) / len(self.attn_dists)
 
