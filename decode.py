@@ -114,7 +114,7 @@ class BeamSearchDecoder(object):
         self.write_for_rouge(original_abstract_sents, decoded_words, counter) # write ref summary and decoded summary to file, to eval with pyrouge later
         counter += 1 # this is how many examples we've decoded
       else:
-        print_results(article_withunks, abstract_withunks, decoded_output) # log output to screen
+        print_results(article_withunks, abstract_withunks, decoded_output, best_hyp) # log output to screen
         self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, best_hyp.attn_dists, best_hyp.p_gens) # write info to .json file for visualization tool
 
         # Check if SECS_UNTIL_NEW_CKPT has elapsed; if so return so we can load a new checkpoint
@@ -189,12 +189,13 @@ class BeamSearchDecoder(object):
     tf.logging.info('Wrote visualization data to %s', output_fname)
 
 
-def print_results(article, abstract, decoded_output):
+def print_results(article, abstract, decoded_output, hyp):
   """Prints the article, the reference summmary and the decoded summary to screen"""
   print ""
   tf.logging.info('ARTICLE:  %s', article)
   tf.logging.info('REFERENCE SUMMARY: %s', abstract)
   tf.logging.info('GENERATED SUMMARY: %s', decoded_output)
+  tf.logging.info('AVERAGE LOG_PROB & LOG_TOP_ATTN: %f, %f', (hyp.avg_log_prob, hyp.avg_top_attn))
   print ""
 
 
