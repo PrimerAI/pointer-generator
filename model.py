@@ -217,6 +217,7 @@ class SummarizationModel(object):
       # Add embedding matrix (shared by the encoder and decoder inputs)
       with tf.variable_scope('embedding'):
         if FLAGS.embeddings_path:
+          tf.logging.info('Using pretrained embeddings')
           embedding_value = np.load(FLAGS.embeddings_path)
           embedding = tf.Variable(
             name='embedding',
