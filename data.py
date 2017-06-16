@@ -18,6 +18,7 @@
 
 import glob
 import random
+import string
 import struct
 import csv
 from tensorflow.core.example import example_pb2
@@ -46,6 +47,7 @@ class Vocab(object):
     self._word_to_id = {}
     self._id_to_word = {}
     self._count = 0 # keeps track of total number of words in the Vocab
+    allowed_chars = set(string.letters + string.punctuation)
 
     # [UNK], [PAD], [START] and [STOP] get the ids 0,1,2,3.
     for w in [UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING]:
@@ -65,6 +67,9 @@ class Vocab(object):
           raise Exception('<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab file, but %s is' % w)
         if w in self._word_to_id:
           raise Exception('Duplicated word in vocabulary file: %s' % w)
+        if any(c not in allowed_chars for c in w):
+          continue
+
         self._word_to_id[w] = self._count
         self._id_to_word[self._count] = w
         self._count += 1
@@ -274,3 +279,4 @@ def show_abs_oovs(abstract, vocab, article_oovs):
       new_words.append(w)
   out_str = ' '.join(new_words)
   return out_str
+
