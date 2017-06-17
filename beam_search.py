@@ -100,7 +100,7 @@ def run_beam_search(sess, model, vocab, batch):
   # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
 
   # Initialize beam_size-many hyptheses
-  hyps = [Hypothesis(tokens=[vocab.word2id(data.START_DECODING)],
+  hyps = [Hypothesis(tokens=[vocab.word2id(data.START_DECODING, None)],
                      log_probs=[0.0],
                      state=dec_in_state,
                      attn_dists=[],
@@ -112,7 +112,8 @@ def run_beam_search(sess, model, vocab, batch):
   steps = 0
   while steps < FLAGS.max_dec_steps and len(results) < FLAGS.beam_size:
     latest_tokens = [h.latest_token for h in hyps] # latest token produced by each hypothesis
-    latest_tokens = [t if t in xrange(vocab.size()) else vocab.word2id(data.UNKNOWN_TOKEN) for t in latest_tokens] # change any in-article temporary OOV ids to [UNK] id, so that we can lookup word embeddings
+    # change any in-article temporary OOV ids to [UNK] id, so that we can lookup word embeddings
+    latest_tokens = [batch.article_id_to_word_id_DECODE.get(t, t) for t in latest_tokens]
     states = [h.state for h in hyps] # list of current decoder states of the hypotheses
     prev_coverage = [h.coverage for h in hyps] # list of coverage vectors (or None)
 
@@ -142,7 +143,7 @@ def run_beam_search(sess, model, vocab, batch):
     # Filter and collect any hypotheses that have produced the end token.
     hyps = [] # will contain hypotheses for the next step
     for h in sort_hyps(all_hyps): # in order of most likely h
-      if h.latest_token == vocab.word2id(data.STOP_DECODING): # if stop token is reached...
+      if h.latest_token == vocab.word2id(data.STOP_DECODING, None): # if stop token is reached...
         # If this hypothesis is sufficiently long, put in results. Otherwise discard.
         if steps >= FLAGS.min_dec_steps:
           results.append(h)

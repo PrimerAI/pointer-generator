@@ -21,6 +21,7 @@ from random import shuffle
 from threading import Thread
 import time
 import numpy as np
+import re
 import tensorflow as tf
 import data
 
@@ -40,20 +41,21 @@ class Example(object):
     self.hps = hps
 
     # Get ids of special tokens
-    start_decoding = vocab.word2id(data.START_DECODING)
-    stop_decoding = vocab.word2id(data.STOP_DECODING)
+    start_decoding = vocab.word2id(data.START_DECODING, None)
+    stop_decoding = vocab.word2id(data.STOP_DECODING, None)
 
     # Process the article
-    article_words = article.split()
+    article_words = [self.parse_word(word) for word in article.split()]
+
     if len(article_words) > hps.max_enc_steps:
       article_words = article_words[:hps.max_enc_steps]
     self.enc_len = len(article_words) # store the length after truncation but before padding
-    self.enc_input = [vocab.word2id(w) for w in article_words] # list of word ids; OOVs are represented by the id for UNK token
+    self.enc_input = [vocab.word2id(w, entity_type) for w, entity_type in article_words] # list of word ids; OOVs are represented by the id for UNK token
 
     # Process the abstract
     abstract = ' '.join(abstract_sentences) # string
-    abstract_words = abstract.split() # list of strings
-    abs_ids = [vocab.word2id(w) for w in abstract_words] # list of word ids; OOVs are represented by the id for UNK token
+    abstract_words = [self.parse_word(word) for word in abstract.split()]
+    abs_ids = [vocab.word2id(w, entity_type) for w, entity_type in abstract_words] # list of word ids; OOVs are represented by the id for UNK token
 
     # Get the decoder input sequence and target sequence
     self.dec_input, self.target = self.get_dec_inp_targ_seqs(abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
@@ -62,7 +64,9 @@ class Example(object):
     # If using pointer-generator mode, we need to store some extra info
     if hps.pointer_gen:
       # Store a version of the enc_input where in-article OOVs are represented by their temporary OOV id; also store the in-article OOVs words themselves
-      self.enc_input_extend_vocab, self.article_oovs = data.article2ids(article_words, vocab)
+      self.enc_input_extend_vocab, self.article_oovs, self.article_id_to_word_id = (
+        data.article2ids(article_words, vocab)
+      )
 
       # Get a verison of the reference summary where in-article OOVs are represented by their temporary article OOV id
       abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
@@ -75,6 +79,18 @@ class Example(object):
     self.original_abstract = abstract
     self.original_abstract_sents = abstract_sentences
 
+  def parse_word(self, word):
+    """
+    Returns (word, entity type) where entity_type exists if the word is of the form
+    'word[entity_type]'.
+    """
+    entity_type_match = re.search(r'(\[.*\])$', word)
+    if not entity_type_match:
+      return (word, None)
+    entity_type = word[entity_type_match.start():]
+    if entity_type in data.ENTITY_TOKENS:
+      return (word[:entity_type_match.start()], entity_type)
+    return (word, None)
 
   def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):
     """Given the reference summary as a sequence of tokens, return the input sequence for the decoder, and the target sequence which we will use to calculate loss. The sequence will be truncated if it is longer than max_len. The input sequence must start with the start_id and the target sequence must end with the stop_id (but not if it's been truncated).
@@ -128,7 +144,7 @@ class Batch(object):
        hps: hyperparameters
        vocab: Vocabulary object
     """
-    self.pad_id = vocab.word2id(data.PAD_TOKEN) # id of the PAD token used to pad sequences
+    self.pad_id = vocab.word2id(data.PAD_TOKEN, None) # id of the PAD token used to pad sequences
     self.init_encoder_seq(example_list, hps) # initialize the input to the encoder
     self.init_decoder_seq(example_list, hps) # initialize the input and targets for the decoder
     self.store_orig_strings(example_list) # store the original strings
@@ -175,6 +191,7 @@ class Batch(object):
       self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
       for i, ex in enumerate(example_list):
         self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
+      self.article_id_to_word_id_DECODE = example_list[0].article_id_to_word_id
 
   def init_decoder_seq(self, example_list, hps):
     """Initializes the following:
@@ -207,7 +224,6 @@ class Batch(object):
     self.original_articles = [ex.original_article for ex in example_list] # list of lists
     self.original_abstracts = [ex.original_abstract for ex in example_list] # list of lists
     self.original_abstracts_sents = [ex.original_abstract_sents for ex in example_list] # list of list of lists
-
 
 class Batcher(object):
   """A class to generate minibatches of data. Buckets examples together based on length of the encoder sequence."""
