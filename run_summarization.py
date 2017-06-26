@@ -67,7 +67,7 @@ tf.app.flags.DEFINE_float('cov_loss_wt', 1.0, 'Weight of coverage loss (lambda i
 tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-coverage model to a coverage model. Turn this on and run in train mode. Your current model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
 
 
-def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay=0.99):
+def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay):
   """Calculate the running average loss via exponential decay.
   This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
 
@@ -123,7 +123,7 @@ def setup_training(model, batcher):
   train_dir = os.path.join(FLAGS.log_root, "train")
   if not os.path.exists(train_dir): os.makedirs(train_dir)
 
-  default_device = tf.device('/cpu:0')
+  default_device = tf.device('/gpu:0')
   with default_device:
     model.build_graph() # build the graph
     if FLAGS.convert_to_coverage_model:
@@ -177,7 +177,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
         summary_writer.flush()
 
 
-def run_eval(model, batcher, vocab):
+def run_eval(model, batcher, vocab, seconds_per_eval=20):
   """Repeatedly runs eval iterations, logging to screen and writing summaries. Saves the model with the best loss seen so far."""
   model.build_graph() # build the graph
   saver = tf.train.Saver(max_to_keep=3) # we will keep 3 best checkpoints at a time
@@ -211,7 +211,8 @@ def run_eval(model, batcher, vocab):
     summary_writer.add_summary(summaries, train_step)
 
     # calculate running avg loss
-    running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step)
+    decay = max(.9, min(.99, 1. - seconds_per_eval / 600.))
+    running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step, decay)
 
     # If running_avg_loss is best so far, save this checkpoint (early stopping).
     # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
@@ -220,10 +221,10 @@ def run_eval(model, batcher, vocab):
       saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
       best_loss = running_avg_loss
 
-    # flush the summary writer every so often
-    if train_step % 100 == 0:
-      summary_writer.flush()
+    summary_writer.flush()
 
+    # sleep for a while so as to not slow down training
+    time.sleep(seconds_per_eval)
 
 def main(unused_argv):
   if len(unused_argv) != 1: # prints a message if you've entered flags incorrectly
