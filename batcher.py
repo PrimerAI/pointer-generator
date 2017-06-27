@@ -50,12 +50,12 @@ class Example(object):
     if len(article_words) > hps.max_enc_steps:
       article_words = article_words[:hps.max_enc_steps]
     self.enc_len = len(article_words) # store the length after truncation but before padding
-    self.enc_input = [vocab.word2id(w, entity_type) for w, entity_type in article_words] # list of word ids; OOVs are represented by the id for UNK token
+    self.enc_input = [vocab.word2id(w, word_type) for w, word_type in article_words] # list of word ids; OOVs are represented by the id for UNK token
 
     # Process the abstract
     abstract = ' '.join(abstract_sentences) # string
     abstract_words = [self.parse_word(word) for word in abstract.split()]
-    abs_ids = [vocab.word2id(w, entity_type) for w, entity_type in abstract_words] # list of word ids; OOVs are represented by the id for UNK token
+    abs_ids = [vocab.word2id(w, word_type) for w, word_type in abstract_words] # list of word ids; OOVs are represented by the id for UNK token
 
     # Get the decoder input sequence and target sequence
     self.dec_input, self.target = self.get_dec_inp_targ_seqs(abs_ids, hps.max_dec_steps, start_decoding, stop_decoding)
@@ -81,15 +81,14 @@ class Example(object):
 
   def parse_word(self, word):
     """
-    Returns (word, entity type) where entity_type exists if the word is of the form
-    'word[entity_type]'.
+    Returns (word, word_type) where word_type exists if the word is of the form 'word[word_type]'.
     """
-    entity_type_match = re.search(r'(\[.*\])$', word)
-    if not entity_type_match:
+    word_type_match = re.search(r'(\[.*\])$', word)
+    if not word_type_match:
       return (word, None)
-    entity_type = word[entity_type_match.start():]
-    if entity_type in data.ENTITY_TOKENS:
-      return (word[:entity_type_match.start()], entity_type)
+    word_type = word[word_type_match.start():]
+    if word_type in data.WORD_TYPE_TOKENS:
+      return (word[:word_type_match.start()], word_type)
     return (word, None)
 
   def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):

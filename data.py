@@ -31,9 +31,8 @@ PAD_TOKEN = '[PAD]' # This has a vocab id, which is used to pad the encoder inpu
 START_DECODING = '[START]' # This has a vocab id, which is used at the start of every decoder input sequence
 STOP_DECODING = '[STOP]' # This has a vocab id, which is used at the end of untruncated target sequences
 
-# These have a vocab id, which is used to represent out-of-vocabulary words according to spacy's
-# entity recognition.
-ENTITY_TOKENS = (
+# Entity type for out-of-vocab words.
+_ENTITY_TOKENS = (
   '[PERSON]',
   '[NORP]',
   '[FACILITY]',
@@ -52,10 +51,28 @@ ENTITY_TOKENS = (
   '[ORDINAL]',
   '[CARDINAL]',
 )
-# For out-of-vocab words not recognized as a entity (i.e. the rest of unknown tokens).
+# Part of speech for out-of-vocab words.
+_POS_TOKENS = (
+  '[ADJ]',
+  '[ADP]',
+  '[ADV]',
+  '[CONJ]',
+  '[DET]',
+  '[INTJ]',
+  '[NOUN]',
+  '[NUM]',
+  '[PART]',
+  '[PRON]',
+  '[PROPN]',
+  '[PUNCT]',
+  '[SYM]',
+  '[VERB]',
+  '[X]',
+)
 UNKNOWN_TOKEN = '[UNK]'
-# Note: none of the above should appear in the vocab file.
 
+WORD_TYPE_TOKENS = _ENTITY_TOKENS + _POS_TOKENS
+UNKNOWN_TOKENS = _ENTITY_TOKENS + _POS_TOKENS + (UNKNOWN_TOKEN,)
 
 class Vocab(object):
   """Vocabulary class for mapping between words and ids (integers)"""
@@ -71,8 +88,8 @@ class Vocab(object):
     self._count = 0 # keeps track of total number of words in the Vocab
     allowed_chars = set(string.letters + string.punctuation)
 
-    # [UNK], [PAD], [START], [STOP], and the ENTITY_TOKENS get the ids 0,1,2,3...
-    for w in (UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING) + ENTITY_TOKENS:
+    # [UNK], [PAD], [START], [STOP], and the UNKNOWN_TOKENS get the ids 0,1,2,3...
+    for w in (UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING) + WORD_TYPE_TOKENS:
       self._word_to_id[w] = self._count
       self._id_to_word[self._count] = w
       self._count += 1
@@ -80,14 +97,14 @@ class Vocab(object):
     # Read the vocab file and add words up to max_size
     with open(vocab_file, 'r') as vocab_f:
       for line in vocab_f:
-        pieces = line.split()
-        if len(pieces) != 2:
+        pieces = line.rstrip().split()
+        if len(pieces) > 1:
           print 'Warning: incorrectly formatted line in vocabulary file: %s\n' % line
           continue
         w = pieces[0]
         if w in (
-          SENTENCE_START, SENTENCE_END, UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING
-        ) + ENTITY_TOKENS:
+          SENTENCE_START, SENTENCE_END, PAD_TOKEN, START_DECODING, STOP_DECODING
+        ) + UNKNOWN_TOKENS:
           raise Exception('<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab file, but %s is' % w)
         if w in self._word_to_id:
           raise Exception('Duplicated word in vocabulary file: %s' % w)
@@ -106,10 +123,10 @@ class Vocab(object):
 
     print "Finished constructing vocabulary of %i total words. Last word added: %s" % (self._count, self._id_to_word[self._count-1])
 
-  def word2id(self, word, entity_type):
+  def word2id(self, word, word_type):
     """Returns the id (integer) of a word (string). Returns [UNK] id if word is OOV."""
-    if entity_type in ENTITY_TOKENS:
-      return self._word_to_id[entity_type]
+    if word_type in WORD_TYPE_TOKENS:
+      return self._word_to_id[word_type]
     if word not in self._word_to_id:
       return self._word_to_id[UNKNOWN_TOKEN]
     return self._word_to_id[word]
@@ -180,7 +197,7 @@ def article2ids(article_words, vocab):
   Map the article words to their ids. Also return a list of OOVs in the article.
 
   Args:
-    article_words: list of (word (string), entity_type) tuples
+    article_words: list of (word (string, word_type) tuples
     vocab: Vocabulary object
 
   Returns:
@@ -197,10 +214,10 @@ def article2ids(article_words, vocab):
   ids = []
   oovs = []
   article_id_to_word_id = {} # for OOV ids
-  unk_ids = set(vocab.word2id('', token) for token in ENTITY_TOKENS + (UNKNOWN_TOKEN,))
+  unk_ids = set(vocab.word2id('', token) for token in UNKNOWN_TOKENS)
 
-  for w, entity_type in article_words:
-    i = vocab.word2id(w, entity_type)
+  for w, word_type in article_words:
+    i = vocab.word2id(w, word_type)
     if i in unk_ids: # If w is OOV
       if w not in oovs: # Add to list of OOVs
         oovs.append(w)
@@ -218,7 +235,7 @@ def abstract2ids(abstract_words, vocab, article_oovs):
   Map the abstract words to their ids. In-article OOVs are mapped to their temporary OOV numbers.
 
   Args:
-    abstract_words: list of (word (string), entity_type) tuples
+    abstract_words: list of (word (string), word_type) tuples
     vocab: Vocabulary object
     article_oovs: list of in-article OOV words (strings), in the order corresponding to their
       temporary article OOV numbers
@@ -228,10 +245,10 @@ def abstract2ids(abstract_words, vocab, article_oovs):
       Out-of-article OOV words are mapped to the UNK token id.
   """
   ids = []
-  unk_ids = set(vocab.word2id('', token) for token in ENTITY_TOKENS + (UNKNOWN_TOKEN,))
+  unk_ids = set(vocab.word2id('', token) for token in UNKNOWN_TOKENS)
 
-  for w, entity_type in abstract_words:
-    i = vocab.word2id(w, entity_type)
+  for w, word_type in abstract_words:
+    i = vocab.word2id(w, word_type)
     if i in unk_ids: # If w is an OOV word
       if w in article_oovs: # If w is an in-article OOV
         vocab_idx = vocab.size() + article_oovs.index(w) # Map to its temporary article OOV number

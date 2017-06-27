@@ -211,7 +211,9 @@ class SummarizationModel(object):
 
     with tf.variable_scope('seq2seq'):
       # Some initializers
-      self.rand_unif_init = tf.random_uniform_initializer(-hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123)
+      self.rand_unif_init = tf.random_uniform_initializer(
+        -hps.rand_unif_init_mag, hps.rand_unif_init_mag, seed=123
+      )
       self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
 
       # Add embedding matrix (shared by the encoder and decoder inputs)
@@ -232,33 +234,48 @@ class SummarizationModel(object):
             dtype=tf.float32,
             initializer=self.trunc_norm_init,
           )
-        if hps.mode=="train": self._add_emb_vis(embedding) # add to tensorboard
-        emb_enc_inputs = tf.nn.embedding_lookup(embedding, self._enc_batch) # tensor with shape (batch_size, max_enc_steps, emb_size)
-        emb_dec_inputs = [tf.nn.embedding_lookup(embedding, x) for x in tf.unstack(self._dec_batch, axis=1)] # list length max_dec_steps containing shape (batch_size, emb_size)
+        if hps.mode=="train":
+          self._add_emb_vis(embedding) # add to tensorboard
+
+        # tensor with shape (batch_size, max_enc_steps, emb_size)
+        emb_enc_inputs = tf.nn.embedding_lookup(embedding, self._enc_batch)
+        # list length max_dec_steps containing shape (batch_size, emb_size)
+        emb_dec_inputs = [
+          tf.nn.embedding_lookup(embedding, x)
+          for x in tf.unstack(self._dec_batch, axis=1)
+        ]
 
       # Add the encoder.
       enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self._enc_lens)
       self._enc_states = enc_outputs
 
-      # Our encoder is bidirectional and our decoder is unidirectional so we need to reduce the final encoder hidden state to the right size to be the initial decoder hidden state
+      # Our encoder is bidirectional and our decoder is unidirectional so we need to reduce the
+      # final encoder hidden state to the right size to be the initial decoder hidden state
       self._dec_in_state = self._reduce_states(fw_st, bw_st)
 
       # Add the decoder.
       with tf.variable_scope('decoder'):
-        decoder_outputs, self._dec_out_state, self.attn_dists, self.p_gens, self.coverage = self._add_decoder(emb_dec_inputs)
+        decoder_outputs, self._dec_out_state, self.attn_dists, self.p_gens, self.coverage = (
+          self._add_decoder(emb_dec_inputs)
+        )
 
       # Add the output projection to obtain the vocabulary distribution
       with tf.variable_scope('output_projection'):
-        w = tf.get_variable('w', [hps.hidden_dim, vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
+        w = tf.get_variable(
+          'w', [hps.hidden_dim, vsize], dtype=tf.float32, initializer=self.trunc_norm_init
+        )
         w_t = tf.transpose(w)
         v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
-        vocab_scores = [] # vocab_scores is the vocabulary distribution before applying softmax. Each entry on the list corresponds to one decoder step
+        # vocab_scores is the vocabulary distribution before applying softmax. Each entry on
+        # the list corresponds to one decoder step
+        vocab_scores = []
         for i,output in enumerate(decoder_outputs):
           if i > 0:
             tf.get_variable_scope().reuse_variables()
           vocab_scores.append(tf.nn.xw_plus_b(output, w, v)) # apply the linear layer
-
-        vocab_dists = [tf.nn.softmax(s) for s in vocab_scores] # The vocabulary distributions. List length max_dec_steps of (batch_size, vsize) arrays. The words are in the order they appear in the vocabulary file.
+        # The vocabulary distributions. List length max_dec_steps of (batch_size, vsize) arrays.
+        # The words are in the order they appear in the vocabulary file.
+        vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
 
 
       # For pointer-generator model, calc final distribution from copy distribution and vocabulary distribution, then take log
