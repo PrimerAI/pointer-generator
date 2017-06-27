@@ -48,7 +48,7 @@ ENTITY_TOKENS = (
   '[TIME]',
   '[PERCENT]',
   '[MONEY]',
-  '[QUANTITY',
+  '[QUANTITY]',
   '[ORDINAL]',
   '[CARDINAL]',
 )
