@@ -25,16 +25,25 @@ def compute_reduced_embeddings_original_vocab(output_filepath, vocab_filepath, v
 
 
 def write_dummy_example(out_file):
-    article = 'hi there Michael[PERSON] . this is Japan[GPE] weeeeeeeeeeeee.'
-    abstract = '<s> Hi Michael[PERSON] . </s>'
-    tf_example = example_pb2.Example()
-    tf_example.features.feature['article'].bytes_list.value.extend([article])
-    tf_example.features.feature['abstract'].bytes_list.value.extend([abstract])
-    tf_example_str = tf_example.SerializeToString()
-    str_len = len(tf_example_str)
-    with open(out_file, 'wb') as writer:
+    def write_single(article, abstract):
+        tf_example = example_pb2.Example()
+        tf_example.features.feature['article'].bytes_list.value.extend([article])
+        tf_example.features.feature['abstract'].bytes_list.value.extend([abstract])
+        tf_example_str = tf_example.SerializeToString()
+        str_len = len(tf_example_str)
+
         writer.write(struct.pack('q', str_len))
         writer.write(struct.pack('%ds' % str_len, tf_example_str))
+
+    with open(out_file, 'wb') as writer:
+        for i in range(1000):
+            article = 'hi there Michael{1} . that was Jake{2} .'
+            abstract = '<s> bye Michael{1} guy . </s>'
+            write_single(article, abstract)
+
+            article = 'hi there Michael{1} . this is Jake{2} .'
+            abstract = '<s> bye Jake{2} . </s>'
+            write_single(article, abstract)
 
 def write_spacy_vocab(output_dirpath, vocab_size, embedding_dim):
     if not os.path.exists(output_dirpath):
@@ -42,6 +51,7 @@ def write_spacy_vocab(output_dirpath, vocab_size, embedding_dim):
 
     allowed_chars = set(string.ascii_letters + string.punctuation)
     ascii = set(string.ascii_letters)
+    ascii_plus_period = set(string.ascii_letters + '.')
     word_set = set()
     spacy_vocab = spacy.load('en').vocab
     top_words = []
@@ -55,12 +65,14 @@ def write_spacy_vocab(output_dirpath, vocab_size, embedding_dim):
                 continue
             if word_string in word_set:
                 continue
-            if '[' in word_string or ']' in word_string:
-                # these are used to mark entity types
+            if any(bad_char in word_string for bad_char in ('[', ']', '<', '>', '{', '}')):
+                # these are used to mark word types and person ids.
                 continue
             if any(c not in allowed_chars for c in word_string):
                 continue
-            if sum(1 for c in word_string if c not in ascii) > 2:
+            if sum(1 for c in word_string if c not in ascii_plus_period) > 1:
+                continue
+            if word_string[-1] == '.' and sum(1 for c in word_string if c in ascii) > 2:
                 continue
 
             top_words.append(w)
@@ -85,5 +97,6 @@ def write_spacy_vocab(output_dirpath, vocab_size, embedding_dim):
 
 
 if __name__ == '__main__':
-    assert len(sys.argv) == 4
-    write_spacy_vocab(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
+    #assert len(sys.argv) == 4
+    #write_spacy_vocab(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
+    write_dummy_example(sys.argv[1])

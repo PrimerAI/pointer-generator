@@ -24,6 +24,8 @@ import tensorflow as tf
 from attention_decoder import attention_decoder
 from tensorflow.contrib.tensorboard.plugins import projector
 
+from data import PEOPLE_ID_SIZE
+
 FLAGS = tf.app.flags.FLAGS
 
 class SummarizationModel(object):
@@ -40,6 +42,7 @@ class SummarizationModel(object):
     # encoder part
     self._enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch')
     self._enc_lens = tf.placeholder(tf.int32, [hps.batch_size], name='enc_lens')
+    self._enc_batch_people = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_people')
     if FLAGS.pointer_gen:
       self._enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
       self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
@@ -47,6 +50,7 @@ class SummarizationModel(object):
     # decoder part
     self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
     self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
+    self._dec_batch_people = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch_people')
     self._padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='padding_mask')
 
     if hps.mode=="decode" and hps.coverage:
@@ -62,6 +66,7 @@ class SummarizationModel(object):
     """
     feed_dict = {}
     feed_dict[self._enc_batch] = batch.enc_batch
+    feed_dict[self._enc_batch_people] = batch.enc_batch_people
     feed_dict[self._enc_lens] = batch.enc_lens
     if FLAGS.pointer_gen:
       feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
@@ -69,6 +74,7 @@ class SummarizationModel(object):
     if not just_enc:
       feed_dict[self._dec_batch] = batch.dec_batch
       feed_dict[self._target_batch] = batch.target_batch
+      feed_dict[self._dec_batch_people] = batch.dec_batch_people
       feed_dict[self._padding_mask] = batch.padding_mask
     return feed_dict
 
@@ -88,7 +94,10 @@ class SummarizationModel(object):
     with tf.variable_scope('encoder'):
       cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
       cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
-      (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
+      (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
+        cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len,
+        swap_memory=True
+      )
       encoder_outputs = tf.concat(axis=2, values=encoder_outputs) # concatenate the forwards and backwards states
     return encoder_outputs, fw_st, bw_st
 
@@ -121,10 +130,13 @@ class SummarizationModel(object):
 
 
   def _add_decoder(self, inputs):
-    """Add attention decoder to the graph. In train or eval mode, you call this once to get output on ALL steps. In decode (beam search) mode, you call this once for EACH decoder step.
+    """
+    Add attention decoder to the graph. In train or eval mode, you call this once to get output
+    on ALL steps. In decode (beam search) mode, you call this once for EACH decoder step.
 
     Args:
-      inputs: inputs to the decoder (word embeddings). A list of tensors shape (batch_size, emb_dim)
+      inputs: inputs to the decoder (word embeddings).
+        A list of tensors shape (batch_size, emb_dim + people_id_size)
 
     Returns:
       outputs: List of tensors; the outputs of the decoder
@@ -138,7 +150,13 @@ class SummarizationModel(object):
 
     prev_coverage = self.prev_coverage if hps.mode=="decode" and hps.coverage else None # In decode mode, we run attention_decoder one step at a time and so need to pass in the previous step's coverage vector each time
 
-    outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(inputs, self._dec_in_state, self._enc_states, cell, initial_state_attention=(hps.mode=="decode"), pointer_gen=hps.pointer_gen, use_coverage=hps.coverage, prev_coverage=prev_coverage)
+    outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
+      inputs, self._dec_in_state, self._enc_states, cell,
+      initial_state_attention=(hps.mode=="decode"),
+      pointer_gen=hps.pointer_gen,
+      use_coverage=hps.coverage,
+      prev_coverage=prev_coverage,
+    )
 
     return outputs, out_state, attn_dists, p_gens, coverage
 
@@ -170,7 +188,7 @@ class SummarizationModel(object):
       batch_nums = tf.expand_dims(batch_nums, 1) # shape (batch_size, 1)
       attn_len = tf.shape(self._enc_batch_extend_vocab)[1] # number of states we attend over
       batch_nums = tf.tile(batch_nums, [1, attn_len]) # shape (batch_size, attn_len)
-      indices = tf.stack( (batch_nums, self._enc_batch_extend_vocab), axis=2) # shape (batch_size, enc_t, 2)
+      indices = tf.stack((batch_nums, self._enc_batch_extend_vocab), axis=2) # shape (batch_size, enc_t, 2)
       shape = [self._hps.batch_size, extended_vsize]
       attn_dists_projected = [tf.scatter_nd(indices, copy_dist, shape) for copy_dist in attn_dists] # list length max_dec_steps (batch_size, extended_vsize)
 
@@ -239,14 +257,21 @@ class SummarizationModel(object):
 
         # tensor with shape (batch_size, max_enc_steps, emb_size)
         emb_enc_inputs = tf.nn.embedding_lookup(embedding, self._enc_batch)
-        # list length max_dec_steps containing shape (batch_size, emb_size)
-        emb_dec_inputs = [
-          tf.nn.embedding_lookup(embedding, x)
-          for x in tf.unstack(self._dec_batch, axis=1)
-        ]
+        # tensor with shape (batch_size, max_enc_steps, people_id_size)
+        enc_inputs_people = tf.one_hot(self._enc_batch_people, depth=PEOPLE_ID_SIZE, axis=-1)
+        emb_enc_full_inputs = tf.concat([emb_enc_inputs, enc_inputs_people], axis=2)
+
+        # list length max_dec_steps containing shape (batch_size, emb_size + people_id_size)
+        emb_dec_inputs = []
+        for w_ids, person_ids in zip(
+          tf.unstack(self._dec_batch, axis=1), tf.unstack(self._dec_batch_people, axis=1)
+        ):
+          w_embeddings = tf.nn.embedding_lookup(embedding, w_ids)
+          person_ids_one_hot = tf.one_hot(person_ids, depth=PEOPLE_ID_SIZE, axis=-1)
+          emb_dec_inputs.append(tf.concat([w_embeddings, person_ids_one_hot], axis=1))
 
       # Add the encoder.
-      enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_inputs, self._enc_lens)
+      enc_outputs, fw_st, bw_st = self._add_encoder(emb_enc_full_inputs, self._enc_lens)
       self._enc_states = enc_outputs
 
       # Our encoder is bidirectional and our decoder is unidirectional so we need to reduce the
@@ -264,7 +289,6 @@ class SummarizationModel(object):
         w = tf.get_variable(
           'w', [hps.hidden_dim, vsize], dtype=tf.float32, initializer=self.trunc_norm_init
         )
-        w_t = tf.transpose(w)
         v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
         # vocab_scores is the vocabulary distribution before applying softmax. Each entry on
         # the list corresponds to one decoder step
@@ -297,7 +321,7 @@ class SummarizationModel(object):
             batch_nums = tf.range(0, limit=hps.batch_size) # shape (batch_size)
             for dec_step, log_dist in enumerate(log_dists):
               targets = self._target_batch[:,dec_step] # The indices of the target words. shape (batch_size)
-              indices = tf.stack( (batch_nums, targets), axis=1) # shape (batch_size, 2)
+              indices = tf.stack((batch_nums, targets), axis=1) # shape (batch_size, 2)
               losses = tf.gather_nd(-log_dist, indices) # shape (batch_size). loss on this step for each batch
               loss_per_step.append(losses)
 
@@ -403,7 +427,9 @@ class SummarizationModel(object):
     return enc_states, dec_in_state
 
 
-  def decode_onestep(self, sess, batch, latest_tokens, enc_states, dec_init_states, prev_coverage):
+  def decode_onestep(
+    self, sess, batch, latest_tokens, latest_people_ids, enc_states, dec_init_states, prev_coverage
+  ):
     """For beam search decoding. Run the decoder for one step.
 
     Args:
@@ -437,13 +463,14 @@ class SummarizationModel(object):
         self._enc_states: enc_states,
         self._dec_in_state: new_dec_in_state,
         self._dec_batch: np.transpose(np.array([latest_tokens])),
+        self._dec_batch_people: np.transpose(np.array([latest_people_ids])),
     }
 
     to_return = {
       "ids": self._topk_ids,
       "probs": self._topk_log_probs,
       "states": self._dec_out_state,
-      "attn_dists": self.attn_dists
+      "attn_dists": self.attn_dists,
     }
 
     if FLAGS.pointer_gen:

@@ -68,18 +68,34 @@ class Hypothesis(object):
     return self.tokens[-1]
 
   @property
-  def log_prob(self):
-    # the log probability of the hypothesis so far is the sum of the log probabilities of the tokens so far
-    return sum(self.log_probs)
-
-  @property
   def avg_log_prob(self):
     # normalize log probability by number of tokens (otherwise longer sequences always have lower probability)
-    return self.log_prob / len(self.tokens)
+    weights = [
+      (.25 + .75 * p_gen) * (1. - .4 * max(attn_dist))
+      for p_gen, attn_dist in zip(self.p_gens, self.attn_dists)
+    ]
+    weight_sum = sum(weights)
+    return sum(weight / weight_sum * log_prob for weight, log_prob in zip(weights, self.log_probs))
+
+  @property
+  def score(self):
+    return self.avg_log_prob - self.cov_loss
 
   @property
   def avg_top_attn(self):
       return sum(max(attn_dist) for attn_dist in self.attn_dists) / len(self.attn_dists)
+
+  @property
+  def cov_loss(self):
+    coverage = np.zeros_like(self.attn_dists[0]) # shape (batch_size, attn_length).
+    covlosses = []  # Coverage loss per decoder timestep. Will be list length max_dec_steps containing shape (batch_size).
+
+    for a in self.attn_dists:
+      covloss = np.minimum(a, coverage).sum()  # calculate the coverage loss for this step
+      covlosses.append(covloss)
+      coverage += a  # update the coverage vector
+
+    return sum(covlosses) / len(covlosses)
 
 
 def run_beam_search(sess, model, vocab, batch):
@@ -112,18 +128,23 @@ def run_beam_search(sess, model, vocab, batch):
   steps = 0
   while steps < FLAGS.max_dec_steps and len(results) < FLAGS.beam_size:
     latest_tokens = [h.latest_token for h in hyps] # latest token produced by each hypothesis
+    # get people ids
+    latest_people_ids = [batch.article_id_to_person_id_DECODE.get(t, -1) for t in latest_tokens]
     # change any in-article temporary OOV ids to [UNK] id, so that we can lookup word embeddings
     latest_tokens = [batch.article_id_to_word_id_DECODE.get(t, t) for t in latest_tokens]
     states = [h.state for h in hyps] # list of current decoder states of the hypotheses
     prev_coverage = [h.coverage for h in hyps] # list of coverage vectors (or None)
 
     # Run one step of the decoder to get the new info
-    (topk_ids, topk_log_probs, new_states, attn_dists, p_gens, new_coverage) = model.decode_onestep(sess=sess,
-                        batch=batch,
-                        latest_tokens=latest_tokens,
-                        enc_states=enc_states,
-                        dec_init_states=states,
-                        prev_coverage=prev_coverage)
+    topk_ids, topk_log_probs, new_states, attn_dists, p_gens, new_coverage = model.decode_onestep(
+      sess=sess,
+      batch=batch,
+      latest_tokens=latest_tokens,
+      latest_people_ids=latest_people_ids,
+      enc_states=enc_states,
+      dec_init_states=states,
+      prev_coverage=prev_coverage,
+    )
 
     # Extend each hypothesis and collect them all in all_hyps
     all_hyps = []
@@ -168,4 +189,4 @@ def run_beam_search(sess, model, vocab, batch):
 
 def sort_hyps(hyps):
   """Return a list of Hypothesis objects, sorted by descending average log probability"""
-  return sorted(hyps, key=lambda h: h.avg_log_prob, reverse=True)
+  return sorted(hyps, key=lambda h: h.score, reverse=True)

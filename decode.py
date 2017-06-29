@@ -195,7 +195,7 @@ def print_results(article, abstract, decoded_output, hyp):
   tf.logging.info('ARTICLE:  %s', article)
   tf.logging.info('REFERENCE SUMMARY: %s', abstract)
   tf.logging.info('GENERATED SUMMARY: %s', decoded_output)
-  tf.logging.info('AVERAGE LOG_PROB & LOG_TOP_ATTN: %f, %f', hyp.avg_log_prob, hyp.avg_top_attn)
+  tf.logging.info('LOG_PROB & COV_LOSS: %f, %f', hyp.avg_log_prob, hyp.cov_loss)
   print ""
 
 
