@@ -28,12 +28,12 @@ import data
 class Example(object):
   """Class representing a train/val/test example for text summarization."""
 
-  def __init__(self, article, abstract_sentences, vocab, hps):
+  def __init__(self, article, abstract, vocab, hps):
     """Initializes the Example, performing tokenization and truncation to produce the encoder, decoder and target sequences, which are stored in self.
 
     Args:
       article: source text; a string. each token is separated by a single space.
-      abstract_sentences: list of strings, one per abstract sentence. In each sentence, each token is separated by a single space.
+      abstract: reference summary; a string. each token is separated by a single space.
       vocab: Vocabulary object
       hps: hyperparameters
     """
@@ -56,7 +56,6 @@ class Example(object):
     self.enc_input_people = [person_id for w, word_type, person_id in article_words]
 
     # Process the abstract
-    abstract = ' '.join(abstract_sentences) # string
     abstract_words = [data.parse_word(word) for word in abstract.split()]
     abs_ids = [vocab.word2id(w, word_type) for w, word_type, person_id in abstract_words] # list of word ids; OOVs are represented by the id for UNK token
     abs_people_ids = [person_id for w, word_type, person_id in abstract_words]
@@ -89,7 +88,6 @@ class Example(object):
     # Store the original strings
     self.original_article = article
     self.original_abstract = abstract
-    self.original_abstract_sents = abstract_sentences
 
 
   def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id, people_seq):
@@ -259,7 +257,6 @@ class Batch(object):
     """Store the original article and abstract strings in the Batch object"""
     self.original_articles = [ex.original_article for ex in example_list] # list of lists
     self.original_abstracts = [ex.original_abstract for ex in example_list] # list of lists
-    self.original_abstracts_sents = [ex.original_abstract_sents for ex in example_list] # list of list of lists
 
 class Batcher(object):
   """A class to generate minibatches of data. Buckets examples together based on length of the encoder sequence."""
@@ -349,8 +346,7 @@ class Batcher(object):
         else:
           raise Exception("single_pass mode is off but the example generator is out of data; error.")
 
-      abstract_sentences = [sent.strip() for sent in data.abstract2sents(abstract)] # Use the <s> and </s> tags in abstract to get a list of sentences.
-      example = Example(article, abstract_sentences, self._vocab, self._hps) # Process into an Example.
+      example = Example(article, abstract, self._vocab, self._hps) # Process into an Example.
       self._example_queue.put(example) # place the Example in the example queue.
 
 

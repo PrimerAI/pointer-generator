@@ -26,10 +26,6 @@ from tensorflow.core.example import example_pb2
 
 PEOPLE_ID_SIZE = 16
 
-# <s> and </s> are used in the data files to segment the abstracts into sentences. They don't receive vocab ids.
-SENTENCE_START = '<s>'
-SENTENCE_END = '</s>'
-
 PAD_TOKEN = '[PAD]' # This has a vocab id, which is used to pad the encoder input, decoder input and target sequence
 START_DECODING = '[START]' # This has a vocab id, which is used at the start of every decoder input sequence
 STOP_DECODING = '[STOP]' # This has a vocab id, which is used at the end of untruncated target sequences
@@ -106,9 +102,7 @@ class Vocab(object):
           print 'Warning: incorrectly formatted line in vocabulary file: %s\n' % line
           continue
         w = pieces[0]
-        if w in (
-          SENTENCE_START, SENTENCE_END, PAD_TOKEN, START_DECODING, STOP_DECODING
-        ) + UNKNOWN_TOKENS:
+        if w in (PAD_TOKEN, START_DECODING, STOP_DECODING) + UNKNOWN_TOKENS:
           raise Exception('<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab file, but %s is' % w)
         if w in self._word_to_id:
           raise Exception('Duplicated word in vocabulary file: %s' % w)
@@ -292,26 +286,6 @@ def outputids2words(id_list, vocab, article_oovs):
         raise ValueError('Error: model produced word ID %i which corresponds to article OOV %i but this example only has %i article OOVs' % (i, article_oov_idx, len(article_oovs)))
     words.append(w)
   return words
-
-
-def abstract2sents(abstract):
-  """Splits abstract text from datafile into list of sentences.
-
-  Args:
-    abstract: string containing <s> and </s> tags for starts and ends of sentences
-
-  Returns:
-    sents: List of sentence strings (no tags)"""
-  cur = 0
-  sents = []
-  while True:
-    try:
-      start_p = abstract.index(SENTENCE_START, cur)
-      end_p = abstract.index(SENTENCE_END, start_p + 1)
-      cur = end_p + len(SENTENCE_END)
-      sents.append(abstract[start_p+len(SENTENCE_START):end_p].strip())
-    except ValueError as e: # no more sentences
-      return sents
 
 
 def show_art_oovs(article, vocab):

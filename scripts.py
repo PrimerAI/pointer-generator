@@ -70,7 +70,7 @@ def write_spacy_vocab(output_dirpath, vocab_size, embedding_dim):
                 continue
             if any(c not in allowed_chars for c in word_string):
                 continue
-            if sum(1 for c in word_string if c not in ascii_plus_period) > 1:
+            if sum(1 for c in word_string if c not in ascii_plus_period) > 2:
                 continue
             if word_string[-1] == '.' and sum(1 for c in word_string if c in ascii) > 2:
                 continue
@@ -98,5 +98,5 @@ def write_spacy_vocab(output_dirpath, vocab_size, embedding_dim):
 
 if __name__ == '__main__':
     #assert len(sys.argv) == 4
-    #write_spacy_vocab(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
-    write_dummy_example(sys.argv[1])
+    write_spacy_vocab(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
+    #write_dummy_example(sys.argv[1])

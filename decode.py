@@ -90,7 +90,6 @@ class BeamSearchDecoder(object):
 
       original_article = batch.original_articles[0]  # string
       original_abstract = batch.original_abstracts[0]  # string
-      original_abstract_sents = batch.original_abstracts_sents[0]  # list of strings
 
       article_withunks = data.show_art_oovs(original_article, self._vocab) # string
       abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab, (batch.art_oovs[0] if FLAGS.pointer_gen else None)) # string
@@ -111,7 +110,7 @@ class BeamSearchDecoder(object):
       decoded_output = ' '.join(decoded_words) # single string
 
       if FLAGS.single_pass:
-        self.write_for_rouge(original_abstract_sents, decoded_words, counter) # write ref summary and decoded summary to file, to eval with pyrouge later
+        self.write_for_rouge(original_abstract, decoded_words, counter) # write ref summary and decoded summary to file, to eval with pyrouge later
         counter += 1 # this is how many examples we've decoded
       else:
         print_results(article_withunks, abstract_withunks, decoded_output, best_hyp) # log output to screen
@@ -124,24 +123,29 @@ class BeamSearchDecoder(object):
           _ = util.load_ckpt(self._saver, self._sess)
           t0 = time.time()
 
-  def write_for_rouge(self, reference_sents, decoded_words, ex_index):
+  def break_into_sentences(self, tokens):
+    sents = []
+    while len(tokens) > 0:
+      try:
+        fst_period_idx = tokens.index(".")
+      except ValueError: # there is text remaining that doesn't end in "."
+        fst_period_idx = len(tokens)
+      sent = tokens[:fst_period_idx + 1] # sentence up to and including the period
+      tokens = tokens [fst_period_idx+1:] # everything else
+      sents.append(' '.join(sent))
+    return sents
+
+  def write_for_rouge(self, abstract, decoded_words, ex_index):
     """Write output to file in correct format for eval with pyrouge. This is called in single_pass mode.
 
     Args:
-      reference_sents: list of strings
+      abstract: string
       decoded_words: list of strings
       ex_index: int, the index with which to label the files
     """
     # First, divide decoded output into sentences
-    decoded_sents = []
-    while len(decoded_words) > 0:
-      try:
-        fst_period_idx = decoded_words.index(".")
-      except ValueError: # there is text remaining that doesn't end in "."
-        fst_period_idx = len(decoded_words)
-      sent = decoded_words[:fst_period_idx+1] # sentence up to and including the period
-      decoded_words = decoded_words[fst_period_idx+1:] # everything else
-      decoded_sents.append(' '.join(sent))
+    decoded_sents = self.break_into_sentences(decoded_words)
+    reference_sents = self.break_into_sentences(abstract.split(' '))
 
     # pyrouge calls a perl script that puts the data into HTML files.
     # Therefore we need to make our output HTML safe.
