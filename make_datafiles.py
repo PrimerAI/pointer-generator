@@ -258,7 +258,7 @@ def read_vocab_file(filename):
   vocab = set()
   with open(filename) as f:
     for line in f:
-      vocab.add(line.strip())
+      vocab.add(line.split()[0])
   return vocab
 
 

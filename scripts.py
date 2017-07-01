@@ -45,6 +45,7 @@ def write_dummy_example(out_file):
             abstract = '<s> bye Jake{2} . </s>'
             write_single(article, abstract)
 
+"""
 def write_spacy_vocab(output_dirpath, vocab_size, embedding_dim):
     if not os.path.exists(output_dirpath):
         os.makedirs(output_dirpath)
@@ -94,9 +95,54 @@ def write_spacy_vocab(output_dirpath, vocab_size, embedding_dim):
     print embeddings.shape
     print [sum(svd.explained_variance_ratio_[:i]) for i in range(1, embedding_dim + 1)]
     np.save(os.path.join(output_dirpath, 'pretrained_embeddings.npy'), embeddings)
+"""
 
+
+def compute_vocab_overlap(vocab_1, vocab_2):
+    matches = [[0] * 5 for i in range(5)]
+    missing = []
+
+    for w1, r1 in vocab_1.iteritems():
+        r2 = vocab_2.get(w1, 100000)
+        for i1, rank1 in enumerate((10000, 20000, 30000, 40000, 50000)):
+            if r1 >= rank1:
+                continue
+
+            for i2, rank2 in enumerate((10000, 20000, 30000, 40000, 50000)):
+                if r2 >= rank2:
+                    if i1 == 0 and i2 == 1:
+                        missing.append((w1, r1))
+                    continue
+
+                matches[i1][i2] += 1
+
+    for row in matches:
+        print row
+
+    missing.sort(key=lambda pair: pair[1])
+    for item in missing:
+        print item
+
+def read_vocab(filename):
+    vocab = {}
+
+    with open(filename) as f:
+        for i, line in enumerate(f):
+            word = line.split()[0]
+            vocab[word] = i
+
+            if i == 100:
+                print vocab
+
+    return vocab
+
+def see_vocab_overlap(filepath1, filepath2):
+    vocab1 = read_vocab(filepath1)
+    vocab2 = read_vocab(filepath2)
+    compute_vocab_overlap(vocab1, vocab2)
 
 if __name__ == '__main__':
     #assert len(sys.argv) == 4
-    write_spacy_vocab(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))
     #write_dummy_example(sys.argv[1])
+    #see_vocab_overlap(sys.argv[1], sys.argv[2])
+    compute_reduced_embeddings_original_vocab(sys.argv[1], sys.argv[2], 30000, 128)

@@ -94,11 +94,14 @@ class Vocab(object):
       self._id_to_word[self._count] = w
       self._count += 1
 
+    allowed_chars = set(string.ascii_letters + string.punctuation)
+    ascii_plus_period = set(string.ascii_letters + '.')
+
     # Read the vocab file and add words up to max_size
     with open(vocab_file, 'r') as vocab_f:
       for line in vocab_f:
         pieces = line.rstrip().split()
-        if len(pieces) > 1:
+        if len(pieces) != 2:
           print 'Warning: incorrectly formatted line in vocabulary file: %s\n' % line
           continue
         w = pieces[0]
@@ -106,10 +109,14 @@ class Vocab(object):
           raise Exception('<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab file, but %s is' % w)
         if w in self._word_to_id:
           raise Exception('Duplicated word in vocabulary file: %s' % w)
+
+        if any(c in w for c in ('[', ']', '{', '}')):
+          # these are used to mark word types and person ids.
+          continue
         if any(c not in allowed_chars for c in w):
           continue
-        # to make sure chars are ok for word type and person id encoding
-        assert not any(bad_char in w for bad_char in ('[', ']', '<', '>', '{', '}'))
+        if sum(1 for c in w if c not in ascii_plus_period) > 2:
+          continue
 
         self._word_to_id[w] = self._count
         self._id_to_word[self._count] = w
