@@ -495,6 +495,8 @@ class SummarizationModel(object):
       # Convert singleton list containing a tensor to a list of k arrays
       assert len(results['p_gens'])==1
       p_gens = results['p_gens'][0].tolist()
+      assert all(len(gen_list) == 1 for gen_list in p_gens)
+      p_gens = [gen_list[0] for gen_list in p_gens]
     else:
       p_gens = [None for _ in xrange(beam_size)]
 
