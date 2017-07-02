@@ -239,10 +239,10 @@ class SummarizationModel(object):
         if FLAGS.embeddings_path:
           tf.logging.info('Using pretrained embeddings')
           embedding_value = np.load(FLAGS.embeddings_path)
+          assert embedding_value.shape == (vsize, hps.emb_dim)
           embedding = tf.Variable(
             name='embedding',
             initial_value=embedding_value,
-            expected_shape=[vsize, hps.emb_dim],
             dtype=tf.float32,
           )
         else:
