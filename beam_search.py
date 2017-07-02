@@ -79,7 +79,7 @@ class Hypothesis(object):
 
   @property
   def score(self):
-    return self.avg_log_prob - self.cov_loss
+    return self.avg_log_prob - self.repeated_n_gram_loss - self.cov_loss
 
   @property
   def avg_top_attn(self):
@@ -96,6 +96,18 @@ class Hypothesis(object):
       coverage += a  # update the coverage vector
 
     return sum(covlosses) / len(covlosses)
+
+  @property
+  def repeated_n_gram_loss(self, disallowed_n=3):
+    seen_n_grams = set()
+
+    for i in range(len(self.tokens) - disallowed_n + 1):
+      n_gram = tuple(self.tokens[i: i + disallowed_n])
+      if n_gram in seen_n_grams:
+        return 10. ** 6
+      seen_n_grams.add(n_gram)
+
+    return 0.
 
 
 def run_beam_search(sess, model, vocab, batch):
@@ -129,9 +141,9 @@ def run_beam_search(sess, model, vocab, batch):
   while steps < FLAGS.max_dec_steps and len(results) < FLAGS.beam_size:
     latest_tokens = [h.latest_token for h in hyps] # latest token produced by each hypothesis
     # get people ids
-    latest_people_ids = [batch.article_id_to_person_id_DECODE.get(t, -1) for t in latest_tokens]
+    latest_people_ids = [batch.article_id_to_person_ids[0].get(t, -1) for t in latest_tokens]
     # change any in-article temporary OOV ids to [UNK] id, so that we can lookup word embeddings
-    latest_tokens = [batch.article_id_to_word_id_DECODE.get(t, t) for t in latest_tokens]
+    latest_tokens = [batch.article_id_to_word_ids[0].get(t, t) for t in latest_tokens]
     states = [h.state for h in hyps] # list of current decoder states of the hypotheses
     prev_coverage = [h.coverage for h in hyps] # list of coverage vectors (or None)
 
@@ -189,4 +201,9 @@ def run_beam_search(sess, model, vocab, batch):
 
 def sort_hyps(hyps):
   """Return a list of Hypothesis objects, sorted by descending average log probability"""
-  return sorted(hyps, key=lambda h: h.score, reverse=True)
+  if FLAGS.smart_decode:
+    score_func = lambda h: h.score
+  else:
+    score_func = lambda h: h.avg_log_prob
+
+  return sorted(hyps, key=score_func, reverse=True)

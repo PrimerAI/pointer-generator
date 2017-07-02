@@ -38,6 +38,7 @@ tf.app.flags.DEFINE_string('embeddings_path', '', 'For the start of training, if
 # Important settings
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
 tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a fixed checkpoint, i.e. take the current checkpoint, and use it to produce one summary for each example in the dataset, write the summaries to file and then get ROUGE scores for the whole dataset. If False (default), run concurrent decoding, i.e. repeatedly load latest checkpoint, use it to produce summaries for randomly-chosen examples and log the results to screen, indefinitely.')
+tf.app.flags.DEFINE_boolean('smart_decode', False, 'For decode mode only. If True, avoid repetition in the output using coverage loss and preventing repeated 3-grams.')
 
 # Where to save output
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
@@ -158,7 +159,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
 
       tf.logging.info('running training step...')
       t0=time.time()
-      results = model.run_train_step(sess, batch)
+      results = model.run_train_step(sess, batch, use_generated_inputs=np.random.random() < .25)
       t1=time.time()
       tf.logging.info('seconds for training step: %.3f', t1-t0)
 

@@ -24,7 +24,7 @@ import tensorflow as tf
 from attention_decoder import attention_decoder
 from tensorflow.contrib.tensorboard.plugins import projector
 
-from data import PEOPLE_ID_SIZE
+from data import PEOPLE_ID_SIZE, START_DECODING
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -57,25 +57,35 @@ class SummarizationModel(object):
       self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
 
 
-  def _make_feed_dict(self, batch, just_enc=False):
+  def _make_feed_dict(self, batch, just_enc=False, dec_batch=None, dec_batch_people=None):
     """Make a feed dictionary mapping parts of the batch to the appropriate placeholders.
 
     Args:
       batch: Batch object
       just_enc: Boolean. If True, only feed the parts needed for the encoder.
+      dec_batch: tensor of shape [batch_size, max_enc_steps].
+      bec_batch_people: tensor of shape [batch_size, max_enc_steps].
     """
+    assert not ((dec_batch is None) ^ (dec_batch_people is None))
+    if dec_batch is None:
+      dec_batch = batch.dec_batch
+      dec_batch_people = batch.dec_batch_people
+
     feed_dict = {}
     feed_dict[self._enc_batch] = batch.enc_batch
     feed_dict[self._enc_batch_people] = batch.enc_batch_people
     feed_dict[self._enc_lens] = batch.enc_lens
+
     if FLAGS.pointer_gen:
       feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
       feed_dict[self._max_art_oovs] = batch.max_art_oovs
+
     if not just_enc:
-      feed_dict[self._dec_batch] = batch.dec_batch
+      feed_dict[self._dec_batch] = dec_batch
       feed_dict[self._target_batch] = batch.target_batch
-      feed_dict[self._dec_batch_people] = batch.dec_batch_people
+      feed_dict[self._dec_batch_people] = dec_batch_people
       feed_dict[self._padding_mask] = batch.padding_mask
+
     return feed_dict
 
   def _add_encoder(self, encoder_inputs, seq_len):
@@ -287,16 +297,18 @@ class SummarizationModel(object):
       # Add the output projection to obtain the vocabulary distribution
       with tf.variable_scope('output_projection'):
         w = tf.get_variable(
-          'w', [hps.hidden_dim, vsize], dtype=tf.float32, initializer=self.trunc_norm_init
+          'w', [hps.hidden_dim, hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init
         )
         v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
+        w_full = tf.matmul(w, embedding, transpose_b=True)
+
         # vocab_scores is the vocabulary distribution before applying softmax. Each entry on
         # the list corresponds to one decoder step
         vocab_scores = []
         for i,output in enumerate(decoder_outputs):
           if i > 0:
             tf.get_variable_scope().reuse_variables()
-          vocab_scores.append(tf.nn.xw_plus_b(output, w, v)) # apply the linear layer
+          vocab_scores.append(tf.nn.xw_plus_b(output, w_full, v)) # apply the linear layer
         # The vocabulary distributions. List length max_dec_steps of (batch_size, vsize) arrays.
         # The words are in the order they appear in the vocabulary file.
         vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
@@ -346,6 +358,10 @@ class SummarizationModel(object):
       assert len(log_dists)==1 # log_dists is a singleton list containing shape (batch_size, extended_vsize)
       log_dists = log_dists[0]
       self._topk_log_probs, self._topk_ids = tf.nn.top_k(log_dists, hps.batch_size*2) # note batch_size=beam_size in decode mode
+    else:
+      # Used to get output words to be fed back for training
+      # shape [max_dec_steps, batch_size, 4]
+      self._topk_log_probs, self._topk_ids = tf.nn.top_k(log_dists, 4)
 
 
   def _add_train_op(self):
@@ -382,18 +398,68 @@ class SummarizationModel(object):
     t1 = time.time()
     tf.logging.info('Time to build graph: %i seconds', t1 - t0)
 
-  def run_train_step(self, sess, batch):
+  def run_train_step(self, sess, batch, use_generated_inputs=False):
     """Runs one training iteration. Returns a dictionary containing train op, summaries, loss, global_step and (optionally) coverage loss."""
-    feed_dict = self._make_feed_dict(batch)
+    feed_dict, to_return = self._get_train_step_feed_return(
+      batch, get_outputs=use_generated_inputs
+    )
+    results = sess.run(to_return, feed_dict)
+    if not use_generated_inputs:
+      return results
+
+    tf.logging.info('running training step with generated input...')
+    t0 = time.time()
+
+    output_ids, output_people_ids = self._get_output_info(batch, results)
+    feed_dict_generated, to_return_generated = self._get_train_step_feed_return(
+      batch, get_outputs=False, output_ids=output_ids, output_people_ids=output_people_ids
+    )
+    results_generated = sess.run(to_return_generated, feed_dict_generated)
+
+    tf.logging.info('seconds for training step with generated input: %.3f', time.time() - t0)
+    tf.logging.info('generated-input loss: %f', results_generated['loss'])
+    if FLAGS.coverage:
+      tf.logging.info("generated-input coverage_loss: %f", results_generated['coverage_loss'])
+
+    return results
+
+  def _get_output_info(self, batch, results):
+    probs = np.exp(results['top_k_log_probs'])
+    ids = results['top_k_ids']
+    assert probs.shape == (self._hps.max_dec_steps, self._hps.batch_size, 4)
+    output_ids = np.empty((self._hps.batch_size, self._hps.max_dec_steps), dtype=np.int32)
+    output_people_ids = np.empty((self._hps.batch_size, self._hps.max_dec_steps), dtype=np.int32)
+
+    for i in range(self._hps.batch_size):
+      output_ids[i, 0] = self._vocab.word2id(START_DECODING, None)
+      output_people_ids[i, 0] = -1
+      for t in range(self._hps.max_dec_steps - 1):
+        prob_dist = probs[t, i] / probs[t, i].sum()
+        output_id = np.asscalar(np.random.choice(ids[t, i], size=1, p=prob_dist))
+        output_ids[i, t + 1] = batch.article_id_to_word_ids[i].get(output_id, output_id)
+        output_people_ids[i, t + 1] = batch.article_id_to_person_ids[i].get(output_id, -1)
+
+    return output_ids, output_people_ids
+
+
+  def _get_train_step_feed_return(self, batch, get_outputs, output_ids=None, output_people_ids=None):
+    assert not (get_outputs and (output_ids or output_people_ids))
+
+    feed_dict = self._make_feed_dict(batch, dec_batch=output_ids, dec_batch_people=output_people_ids)
     to_return = {
-        'train_op': self._train_op,
-        'summaries': self._summaries,
-        'loss': self._loss,
-        'global_step': self.global_step,
+      'train_op': self._train_op,
+      'summaries': self._summaries,
+      'loss': self._loss,
+      'global_step': self.global_step,
     }
     if self._hps.coverage:
       to_return['coverage_loss'] = self._coverage_loss
-    return sess.run(to_return, feed_dict)
+    if get_outputs:
+      to_return['top_k_ids'] = self._topk_ids
+      to_return['top_k_log_probs'] = self._topk_log_probs
+
+    return feed_dict, to_return
+
 
   def run_eval_step(self, sess, batch):
     """Runs one evaluation iteration. Returns a dictionary containing summaries, loss, global_step and (optionally) coverage loss."""

@@ -222,8 +222,8 @@ class Batch(object):
       for i, ex in enumerate(example_list):
         self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
-      self.article_id_to_word_id_DECODE = example_list[0].article_id_to_word_id
-      self.article_id_to_person_id_DECODE = example_list[0].article_id_to_person_id
+      self.article_id_to_word_ids = [example.article_id_to_word_id for example in example_list]
+      self.article_id_to_person_ids = [example.article_id_to_person_id for example in example_list]
 
   def init_decoder_seq(self, example_list, hps):
     """Initializes the following:
