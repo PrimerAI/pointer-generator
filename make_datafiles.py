@@ -59,7 +59,7 @@ def chunk_all(finished_files_dir):
   print "Saved chunked data in %s" % chunks_dir
 
 
-def tokenize_stories(stories_dir, tokenized_stories_dir, vocab):
+def tokenize_stories(stories_dir, tokenized_stories_dir):
   """
   Maps a whole directory of .story files to a tokenized version using spacy
   """
@@ -69,7 +69,7 @@ def tokenize_stories(stories_dir, tokenized_stories_dir, vocab):
   print 'Creating %d workers' % n_workers
 
   for i in range(n_workers):
-    worker = ArticlePreprocesser(tasks, stories_dir, tokenized_stories_dir, vocab)
+    worker = ArticlePreprocesser(tasks, stories_dir, tokenized_stories_dir)
     worker.start()
 
   for story in os.listdir(stories_dir):
@@ -89,12 +89,11 @@ def tokenize_stories(stories_dir, tokenized_stories_dir, vocab):
 
 class ArticlePreprocesser(multiprocessing.Process):
 
-  def __init__(self, task_queue, input_dir, output_dir, vocab):
+  def __init__(self, task_queue, input_dir, output_dir):
     multiprocessing.Process.__init__(self)
     self.task_queue = task_queue
     self.input_dir = input_dir
     self.output_dir = output_dir
-    self.vocab = vocab
 
 
   def run(self):
@@ -110,17 +109,15 @@ class ArticlePreprocesser(multiprocessing.Process):
         self.task_queue.task_done()
         continue
 
-      process_task(input_filename, output_filename, self.vocab)
+      process_task(input_filename, output_filename)
       self.task_queue.task_done()
 
 
-def process_task(input_filename, output_filename, vocab):
+def process_task(input_filename, output_filename):
   article, abstract = get_art_abs(input_filename)
   article = unicode(article, 'utf-8').replace(u'\xa0', ' ')
   abstract = unicode(abstract, 'utf-8').replace(u'\xa0', ' ')
-  article_tokens, abstract_tokens = process_article_abstract(
-    input_filename, article, abstract, vocab
-  )
+  article_tokens, abstract_tokens = process_article_abstract(input_filename, article, abstract)
 
   with open(output_filename, 'w') as f:
     f.write(' '.join(article_tokens).encode('utf-8'))
@@ -129,7 +126,7 @@ def process_task(input_filename, output_filename, vocab):
     f.write(' '.join(abstract_tokens).encode('utf-8'))
 
 
-def process_article_abstract(story_name, article, abstract, vocab):
+def process_article_abstract(story_name, article, abstract):
   doc = SingleDocument(0, raw={'body': article})
   clean_article = doc.clean_text_and_raw_spans()[0]
   full_article = u'%s %s' % (clean_article, abstract)
@@ -152,7 +149,7 @@ def process_article_abstract(story_name, article, abstract, vocab):
       token_text += '{%d}' % person_id
     elif token.ent_type_ in ENTITY_TAGS:
       token_text += '[%s]' % token.ent_type_
-    elif token_text not in vocab and token.pos_ in POS_TAGS:
+    elif token.pos_ in POS_TAGS:
       token_text += '[%s]' % token.pos_
 
     if token.idx < len(clean_article):
@@ -220,14 +217,6 @@ def strip_span(span, text):
   start = span[0] + len(text) - len(text.lstrip())
   end = span[1] - (len(text) - len(text.rstrip()))
   return start, end
-
-
-def read_vocab_file(filename):
-  vocab = set()
-  with open(filename) as f:
-    for line in f:
-      vocab.add(line.split()[0])
-  return vocab
 
 
 def read_text_file(text_file):
@@ -331,21 +320,15 @@ def check_num_stories(stories_dir, num_expected):
     raise Exception("stories directory %s contains %i files but should contain %i" % (stories_dir, num_stories, num_expected))
 
 
-def view_story(story_file, vocab_file):
-  vocab = read_vocab_file(vocab_file)
-  process_task(story_file, 'tmp.story', vocab)
-
-
 def main():
-  if len(sys.argv) != 5:
-    print "USAGE: python make_datafiles.py <raw_stories_dir> <train_test_split_dir> <vocab_file> <output_dir>"
+  if len(sys.argv) != 4:
+    print "USAGE: python make_datafiles.py <raw_stories_dir> <train_test_split_dir> <output_dir>"
     sys.exit()
 
   # Define input / output directories
   raw_stories_dir = sys.argv[1]
   train_test_split_dir = sys.argv[2]
-  vocab_file = sys.argv[3]
-  output_dir = sys.argv[4]
+  output_dir = sys.argv[3]
 
   cnn_stories_dir = os.path.join(raw_stories_dir, 'cnn')
   dm_stories_dir = os.path.join(raw_stories_dir, 'dailymail')
@@ -365,9 +348,8 @@ def main():
   check_num_stories(dm_stories_dir, num_expected_dm_stories)
 
   # Run stanford tokenizer on both stories dirs, outputting to tokenized stories directories
-  vocab = read_vocab_file(vocab_file)
-  tokenize_stories(dm_stories_dir, dm_tokenized_stories_dir, vocab)
-  tokenize_stories(cnn_stories_dir, cnn_tokenized_stories_dir, vocab)
+  tokenize_stories(dm_stories_dir, dm_tokenized_stories_dir)
+  tokenize_stories(cnn_stories_dir, cnn_tokenized_stories_dir)
 
   # Read the tokenized stories, do a little postprocessing then write to bin files
   for dataset in ('train', 'val', 'test'):

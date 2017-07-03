@@ -125,7 +125,7 @@ def run_beam_search(sess, model, vocab, batch):
   # Run the encoder to get the encoder hidden states and decoder initial state
   enc_states, dec_in_state = model.run_encoder(sess, batch)
   # dec_in_state is a LSTMStateTuple
-  # enc_states has shape [batch_size, <=max_enc_steps, 2*hidden_dim].
+  # enc_states has shape [batch_size, <=max_enc_steps, 2*enc_hidden_dim].
 
   # Initialize beam_size-many hyptheses
   hyps = [Hypothesis(tokens=[vocab.word2id(data.START_DECODING, None)],

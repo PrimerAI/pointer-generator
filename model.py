@@ -97,13 +97,13 @@ class SummarizationModel(object):
 
     Returns:
       encoder_outputs:
-        A tensor of shape [batch_size, <=max_enc_steps, 2*hidden_dim]. It's 2*hidden_dim because it's the concatenation of the forwards and backwards states.
+        A tensor of shape [batch_size, <=max_enc_steps, 2*enc_hidden_dim]. It's 2*enc_hidden_dim because it's the concatenation of the forwards and backwards states.
       fw_state, bw_state:
-        Each are LSTMStateTuples of shape ([batch_size,hidden_dim],[batch_size,hidden_dim])
+        Each are LSTMStateTuples of shape ([batch_size, enc_hidden_dim],[batch_size, enc_hidden_dim])
     """
     with tf.variable_scope('encoder'):
-      cell_fw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
-      cell_bw = tf.contrib.rnn.LSTMCell(self._hps.hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+      cell_fw = tf.contrib.rnn.LSTMCell(self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
+      cell_bw = tf.contrib.rnn.LSTMCell(self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True)
       (encoder_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(
         cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len,
         swap_memory=True
@@ -116,20 +116,21 @@ class SummarizationModel(object):
     """Add to the graph a linear layer to reduce the encoder's final FW and BW state into a single initial state for the decoder. This is needed because the encoder is bidirectional but the decoder is not.
 
     Args:
-      fw_st: LSTMStateTuple with hidden_dim units.
-      bw_st: LSTMStateTuple with hidden_dim units.
+      fw_st: LSTMStateTuple with enc_hidden_dim units.
+      bw_st: LSTMStateTuple with enc_hidden_dim units.
 
     Returns:
-      state: LSTMStateTuple with hidden_dim units.
+      state: LSTMStateTuple with dec_hidden_dim units.
     """
-    hidden_dim = self._hps.hidden_dim
+    enc_hidden_dim = self._hps.enc_hidden_dim
+    dec_hidden_dim = self._hps.dec_hidden_dim
     with tf.variable_scope('reduce_final_st'):
 
       # Define weights and biases to reduce the cell and reduce the state
-      w_reduce_c = tf.get_variable('w_reduce_c', [hidden_dim * 2, hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-      w_reduce_h = tf.get_variable('w_reduce_h', [hidden_dim * 2, hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-      bias_reduce_c = tf.get_variable('bias_reduce_c', [hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
-      bias_reduce_h = tf.get_variable('bias_reduce_h', [hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+      w_reduce_c = tf.get_variable('w_reduce_c', [2 * enc_hidden_dim, dec_hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+      w_reduce_h = tf.get_variable('w_reduce_h', [2 * enc_hidden_dim, dec_hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+      bias_reduce_c = tf.get_variable('bias_reduce_c', [dec_hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
+      bias_reduce_h = tf.get_variable('bias_reduce_h', [dec_hidden_dim], dtype=tf.float32, initializer=self.trunc_norm_init)
 
       # Apply linear layer
       old_c = tf.concat(axis=1, values=[fw_st.c, bw_st.c]) # Concatenation of fw and bw cell
@@ -156,7 +157,7 @@ class SummarizationModel(object):
       coverage: A tensor, the current coverage vector
     """
     hps = self._hps
-    cell = tf.contrib.rnn.LSTMCell(hps.hidden_dim, state_is_tuple=True, initializer=self.rand_unif_init)
+    cell = tf.contrib.rnn.LSTMCell(hps.dec_hidden_dim, state_is_tuple=True, initializer=self.rand_unif_init)
 
     prev_coverage = self.prev_coverage if hps.mode=="decode" and hps.coverage else None # In decode mode, we run attention_decoder one step at a time and so need to pass in the previous step's coverage vector each time
 
@@ -250,7 +251,7 @@ class SummarizationModel(object):
           tf.logging.info('Using pretrained embeddings')
           embedding_value = np.load(FLAGS.embeddings_path)
 
-          if FLAGS.restrictive_embeddings:
+          if hps.restrictive_embeddings:
             assert embedding_value.shape[0] == vsize
             embedding_transform = tf.get_variable(
               'embedding_transform',
@@ -319,7 +320,7 @@ class SummarizationModel(object):
       # Add the output projection to obtain the vocabulary distribution
       with tf.variable_scope('output_projection'):
         w = tf.get_variable(
-          'w', [hps.hidden_dim, hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init
+          'w', [hps.dec_hidden_dim, hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init
         )
         v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
         w_full = tf.matmul(w, embedding, transpose_b=True)
@@ -401,7 +402,7 @@ class SummarizationModel(object):
     tf.summary.scalar('global_norm', global_norm)
 
     # Apply optimizer
-    if FLAGS.adam_optimizer:
+    if self._hps.adam_optimizer:
       optimizer = tf.train.AdamOptimizer()
     else:
       optimizer = tf.train.AdagradOptimizer(self._hps.lr, initial_accumulator_value=self._hps.adagrad_init_acc)
@@ -506,13 +507,13 @@ class SummarizationModel(object):
       batch: Batch object that is the same example repeated across the batch (for beam search)
 
     Returns:
-      enc_states: The encoder states. A tensor of shape [batch_size, <=max_enc_steps, 2*hidden_dim].
-      dec_in_state: A LSTMStateTuple of shape ([1,hidden_dim],[1,hidden_dim])
+      enc_states: The encoder states. A tensor of shape [batch_size, <=max_enc_steps, 2*enc_hidden_dim].
+      dec_in_state: A LSTMStateTuple of shape ([1, dec_hidden_dim],[1, dec_hidden_dim])
     """
     feed_dict = self._make_feed_dict(batch, just_enc=True) # feed the batch into the placeholders
     (enc_states, dec_in_state, global_step) = sess.run([self._enc_states, self._dec_in_state, self.global_step], feed_dict) # run the encoder
 
-    # dec_in_state is LSTMStateTuple shape ([batch_size,hidden_dim],[batch_size,hidden_dim])
+    # dec_in_state is LSTMStateTuple shape ([batch_size, dec_hidden_dim],[batch_size, dec_hidden_dim])
     # Given that the batch is a single example repeated, dec_in_state is identical across the batch so we just take the top row.
     dec_in_state = tf.contrib.rnn.LSTMStateTuple(dec_in_state.c[0], dec_in_state.h[0])
     return enc_states, dec_in_state
@@ -535,7 +536,7 @@ class SummarizationModel(object):
       ids: top 2k ids. shape [beam_size, 2*beam_size]
       probs: top 2k log probabilities. shape [beam_size, 2*beam_size]
       new_states: new states of the decoder. a list length beam_size containing
-        LSTMStateTuples each of shape ([hidden_dim,],[hidden_dim,])
+        LSTMStateTuples each of shape ([dec_hidden_dim,],[dec_hidden_dim,])
       attn_dists: List length beam_size containing lists length attn_length.
       p_gens: Generation probabilities for this step. A list length beam_size. List of None if in baseline mode.
       new_coverage: Coverage vectors for this step. A list of arrays. List of None if coverage is not turned on.
@@ -546,8 +547,8 @@ class SummarizationModel(object):
     # Turn dec_init_states (a list of LSTMStateTuples) into a single LSTMStateTuple for the batch
     cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
     hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
-    new_c = np.concatenate(cells, axis=0)  # shape [batch_size,hidden_dim]
-    new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size,hidden_dim]
+    new_c = np.concatenate(cells, axis=0)  # shape [batch_size, dec_hidden_dim]
+    new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size, dec_hidden_dim]
     new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
 
     feed = {

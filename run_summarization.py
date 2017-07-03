@@ -46,7 +46,8 @@ tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in a directory with this name, under log_root.')
 
 # Hyperparameters
-tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
+tf.app.flags.DEFINE_integer('enc_hidden_dim', 256, 'dimension of RNN hidden states')
+tf.app.flags.DEFINE_integer('dec_hidden_dim', 400, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('batch_size', 16, 'minibatch size')
 tf.app.flags.DEFINE_integer('max_enc_steps', 400, 'max timesteps of encoder (max source text tokens)')
@@ -246,7 +247,8 @@ def main(unused_argv):
     else:
       raise Exception("Logdir %s doesn't exist. Run in train mode to create it." % (FLAGS.log_root))
 
-  vocab = Vocab(FLAGS.vocab_path, FLAGS.vocab_size) # create a vocabulary
+  vocab_size = 50000 if FLAGS.restrictive_embeddings else 20000
+  vocab = Vocab(FLAGS.vocab_path, vocab_size) # create a vocabulary
 
   # If in decode mode, set batch_size = beam_size
   # Reason: in decode mode, we decode one example at a time.
@@ -258,8 +260,29 @@ def main(unused_argv):
   if FLAGS.single_pass and FLAGS.mode!='decode':
     raise Exception("The single_pass flag should only be True in decode mode")
 
+  if FLAGS.restrictive_embeddings and not FLAGS.embeddings_path:
+    raise Exception("Cannot use restrictive embeddings with no pretrained embeddings")
+
   # Make a namedtuple hps, containing the values of the hyperparameters that the model needs
-  hparam_list = ['mode', 'lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim', 'emb_dim', 'batch_size', 'max_dec_steps', 'max_enc_steps', 'coverage', 'cov_loss_wt', 'pointer_gen']
+  hparam_list = {
+    'mode',
+    'lr',
+    'adagrad_init_acc',
+    'rand_unif_init_mag',
+    'trunc_norm_init_std',
+    'max_grad_norm',
+    'enc_hidden_dim',
+    'dec_hidden_dim',
+    'emb_dim',
+    'batch_size',
+    'max_dec_steps',
+    'max_enc_steps',
+    'coverage',
+    'cov_loss_wt',
+    'pointer_gen',
+    'restrictive_embeddings',
+    'adam_optimizer',
+  }
   hps_dict = {}
   for key,val in FLAGS.__flags.iteritems(): # for each flag
     if key in hparam_list: # if it's in the list

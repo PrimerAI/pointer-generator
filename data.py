@@ -134,11 +134,13 @@ class Vocab(object):
 
   def word2id(self, word, word_type):
     """Returns the id (integer) of a word (string). Returns [UNK] id if word is OOV."""
-    if word_type in WORD_TYPE_TOKENS:
+    if word_type in ENTITY_TOKENS:
       return self._word_to_id[word_type]
-    if word not in self._word_to_id:
-      return self._word_to_id[UNKNOWN_TOKEN]
-    return self._word_to_id[word]
+    if word in self._word_to_id:
+      return self._word_to_id[word]
+    if word_type in POS_TOKENS:
+      return self._word_to_id[word_type]
+    return self._word_to_id[UNKNOWN_TOKEN]
 
   def id2word(self, word_id):
     """Returns the word (string) corresponding to an id (integer)."""
@@ -353,20 +355,23 @@ def parse_word(word):
   
   Only one of those two forms is possible at a time.
   """
-  person_id_match = re.search(r'(\{.*\})$', word)
-  if person_id_match:
-    real_word = word[:person_id_match.start()]
-    person_id = int(word[person_id_match.start() + 1: -1])
+  def find_match(pattern):
+    match = re.search(pattern, word)
+    if match:
+      return word[:match.start()], word[match.start():]
+    return word, ''
+
+  real_word, person_id = find_match(r'(\{.*\})$')
+  if person_id:
+    person_id = int(person_id[1: -1])
     if person_id < PEOPLE_ID_SIZE:
       return real_word, PERSON_TOKEN, person_id
     else:
       return real_word, PERSON_TOKEN, -1
 
-  word_type_match = re.search(r'(\[.*\])$', word)
-  if word_type_match:
-    real_word = word[:word_type_match.start()]
-    word_type = word[word_type_match.start():]
-    if word_type in WORD_TYPE_TOKENS:
+  real_word, word_type = find_match(r'(\[.*\])$')
+  if word_type:
+    if word_type in ENTITY_TOKENS + POS_TOKENS:
       return real_word, word_type, -1
     else:
       return real_word, None, -1
