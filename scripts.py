@@ -168,4 +168,6 @@ if __name__ == '__main__':
     #assert len(sys.argv) == 4
     #write_dummy_example(sys.argv[1])
     #see_vocab_overlap(sys.argv[1], sys.argv[2])
-    compute_reduced_embeddings_original_vocab(sys.argv[1], sys.argv[2], sys.argv[3], 20000, 300)
+    compute_reduced_embeddings_original_vocab(
+        sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
+    )

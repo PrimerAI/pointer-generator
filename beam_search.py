@@ -69,6 +69,9 @@ class Hypothesis(object):
 
   @property
   def avg_log_prob(self):
+    if any(token < data.N_FREE_TOKENS for token in self.tokens):
+      return -10. ** 6
+
     # normalize log probability by number of tokens (otherwise longer sequences always have lower probability)
     weights = [
       (.25 + .75 * p_gen) * (1. - .4 * max(attn_dist))
@@ -140,8 +143,6 @@ def run_beam_search(sess, model, vocab, batch):
   steps = 0
   while steps < FLAGS.max_dec_steps and len(results) < FLAGS.beam_size:
     latest_tokens = [h.latest_token for h in hyps] # latest token produced by each hypothesis
-    # get people ids
-    latest_people_ids = [batch.article_id_to_person_ids[0].get(t, -1) for t in latest_tokens]
     # change any in-article temporary OOV ids to [UNK] id, so that we can lookup word embeddings
     latest_tokens = [batch.article_id_to_word_ids[0].get(t, t) for t in latest_tokens]
     states = [h.state for h in hyps] # list of current decoder states of the hypotheses
@@ -152,7 +153,6 @@ def run_beam_search(sess, model, vocab, batch):
       sess=sess,
       batch=batch,
       latest_tokens=latest_tokens,
-      latest_people_ids=latest_people_ids,
       enc_states=enc_states,
       dec_init_states=states,
       prev_coverage=prev_coverage,
