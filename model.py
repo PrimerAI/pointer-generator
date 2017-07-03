@@ -24,7 +24,7 @@ import tensorflow as tf
 from attention_decoder import attention_decoder
 from tensorflow.contrib.tensorboard.plugins import projector
 
-from data import PEOPLE_ID_SIZE, START_DECODING
+from data import N_FREE_TOKENS, PEOPLE_ID_SIZE, START_DECODING
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -249,12 +249,34 @@ class SummarizationModel(object):
         if FLAGS.embeddings_path:
           tf.logging.info('Using pretrained embeddings')
           embedding_value = np.load(FLAGS.embeddings_path)
-          assert embedding_value.shape == (vsize, hps.emb_dim)
-          embedding = tf.Variable(
-            name='embedding',
-            initial_value=embedding_value,
-            dtype=tf.float32,
-          )
+
+          if FLAGS.restrictive_embeddings:
+            assert embedding_value.shape[0] == vsize
+            embedding_transform = tf.get_variable(
+              'embedding_transform',
+              shape=[embedding_value.shape[1], hps.emb_dim],
+              dtype=tf.float32,
+              initializer=self.trunc_norm_init,
+            )
+            known_token_embeddings = tf.matmul(embedding_value, embedding_transform)
+            unknown_token_embeddings = tf.get_variable(
+              'unknown_token_embeddings',
+              shape=[N_FREE_TOKENS, hps.emb_dim],
+              dtype=tf.float32,
+              initializer=self.trunc_norm_init,
+            )
+            unknown_token_embeddings_full = tf.pad(
+              unknown_token_embeddings, [[0, vsize - N_FREE_TOKENS], [0, 0]]
+            )
+            embedding = known_token_embeddings + unknown_token_embeddings_full
+          else:
+            assert embedding_value.shape == (vsize, hps.emb_dim)
+            embedding = tf.Variable(
+              name='embedding',
+              initial_value=embedding_value,
+              dtype=tf.float32,
+            )
+
         else:
           embedding = tf.get_variable(
             'embedding',
@@ -378,8 +400,11 @@ class SummarizationModel(object):
     # Add a summary
     tf.summary.scalar('global_norm', global_norm)
 
-    # Apply adagrad optimizer
-    optimizer = tf.train.AdagradOptimizer(self._hps.lr, initial_accumulator_value=self._hps.adagrad_init_acc)
+    # Apply optimizer
+    if FLAGS.adam_optimizer:
+      optimizer = tf.train.AdamOptimizer()
+    else:
+      optimizer = tf.train.AdagradOptimizer(self._hps.lr, initial_accumulator_value=self._hps.adagrad_init_acc)
     with tf.device("/gpu:0"):
       self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=self.global_step, name='train_step')
 

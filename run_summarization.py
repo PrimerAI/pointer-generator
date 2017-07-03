@@ -39,6 +39,7 @@ tf.app.flags.DEFINE_string('embeddings_path', '', 'For the start of training, if
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
 tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a fixed checkpoint, i.e. take the current checkpoint, and use it to produce one summary for each example in the dataset, write the summaries to file and then get ROUGE scores for the whole dataset. If False (default), run concurrent decoding, i.e. repeatedly load latest checkpoint, use it to produce summaries for randomly-chosen examples and log the results to screen, indefinitely.')
 tf.app.flags.DEFINE_boolean('smart_decode', False, 'For decode mode only. If True, avoid repetition in the output using coverage loss and preventing repeated 3-grams.')
+tf.app.flags.DEFINE_boolean('restrictive_embeddings', False, 'If True, then restricts word embeddings to be a linear transform of the pretrained embeddings.')
 
 # Where to save output
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
@@ -62,10 +63,12 @@ tf.app.flags.DEFINE_float('max_grad_norm', 2.0, 'for gradient clipping')
 # Pointer-generator or baseline model
 tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
 
-# Coverage hyperparameters
+# Training hyperparameters
+tf.app.flags.DEFINE_boolean('adam_optimizer', False, 'Use Adam optimizer instead of Adagrad.')
 tf.app.flags.DEFINE_boolean('coverage', False, 'Use coverage mechanism. Note, the experiments reported in the ACL paper train WITHOUT coverage until converged, and then train for a short phase WITH coverage afterwards. i.e. to reproduce the results in the ACL paper, turn this off for most of training then turn on for a short phase at the end.')
 tf.app.flags.DEFINE_float('cov_loss_wt', 1.0, 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
 tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-coverage model to a coverage model. Turn this on and run in train mode. Your current model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
+tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
 
 
 def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay):
@@ -158,10 +161,11 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
       batch = batcher.next_batch()
 
       tf.logging.info('running training step...')
-      t0=time.time()
-      results = model.run_train_step(sess, batch, use_generated_inputs=np.random.random() < .25)
-      t1=time.time()
-      tf.logging.info('seconds for training step: %.3f', t1-t0)
+      t0 = time.time()
+      use_generated_inputs = FLAGS.corrective_training and np.random.random() < .25
+      results = model.run_train_step(sess, batch, use_generated_inputs)
+      t1 = time.time()
+      tf.logging.info('seconds for training step: %.3f', t1 - t0)
 
       loss = results['loss']
       tf.logging.info('loss: %f', loss) # print the loss to screen

@@ -7,6 +7,7 @@ import time
 from collections import defaultdict
 from tensorflow.core.example import example_pb2
 
+from data import ENTITY_TOKENS, POS_TOKENS
 from primer_core.entities.people import SpacyPeopleResolver
 from primer_core.nlp.get_spacy import get_spacy
 from pygov.analytic_pipeline.document_pipeline import SingleDocument
@@ -22,42 +23,9 @@ num_expected_dm_stories = 219506
 
 CHUNK_SIZE = 1000 # num examples per chunk, for the chunked data
 
-ENTITY_TAGS = (
-  'PERSON',
-  'NORP',
-  'FACILITY',
-  'ORG',
-  'GPE',
-  'LOC',
-  'PRODUCT',
-  'EVENT',
-  'WORK_OF_ART',
-  'LANGUAGE',
-  'DATE',
-  'TIME',
-  'PERCENT',
-  'MONEY',
-  'QUANTITY',
-  'ORDINAL',
-  'CARDINAL',
-)
-POS_TAGS = (
-  'ADJ',
-  'ADP',
-  'ADV',
-  'CONJ',
-  'DET',
-  'INTJ',
-  'NOUN',
-  'NUM',
-  'PART',
-  'PRON',
-  'PROPN',
-  'PUNCT',
-  'SYM',
-  'VERB',
-  'X',
-)
+assert all(token[0] == '[' and token[-1] == ']' for token in ENTITY_TOKENS + POS_TOKENS)
+ENTITY_TAGS = tuple(token[1: -1] for token in ENTITY_TOKENS)
+POS_TAGS = tuple(token[1: -1] for token in POS_TOKENS)
 
 
 def chunk_file(finished_files_dir, chunks_dir, set_name):

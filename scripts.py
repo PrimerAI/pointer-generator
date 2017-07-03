@@ -7,21 +7,44 @@ import sys
 from sklearn.decomposition.truncated_svd import TruncatedSVD
 from tensorflow.core.example import example_pb2
 
-from data import Vocab
+from data import N_FREE_TOKENS, Vocab
 
-def compute_reduced_embeddings_original_vocab(output_filepath, vocab_filepath, vocab_size, embedding_dim):
-    vocab = Vocab(vocab_filepath, vocab_size)
+def compute_reduced_embeddings_original_vocab(
+    output_vocab_filepath, output_embeddings_filepath, input_vocab_filepath, vocab_size,
+    embedding_dim
+):
+    print N_FREE_TOKENS
+    vocab = Vocab(input_vocab_filepath, 1.5 * vocab_size)
     spacy_vocab = spacy.load('en').vocab
     matrix = np.zeros((vocab_size, spacy_vocab.vectors_length), dtype=np.float32)
+    new_i = 0
+    final_vocab = []
 
     for i, word in vocab._id_to_word.iteritems():
-        matrix[i] = spacy_vocab[unicode(word)].vector
+        if new_i == vocab_size:
+            break
 
-    svd = TruncatedSVD(n_components=embedding_dim, algorithm='arpack')
-    embeddings = svd.fit_transform(matrix)
-    print embeddings.shape
-    print [sum(svd.explained_variance_ratio_[:i]) for i in range(1, embedding_dim + 1)]
-    np.save(output_filepath, embeddings)
+        vector = spacy_vocab[unicode(word)].vector
+        if i >= N_FREE_TOKENS and np.allclose(vector, 0.):
+            continue
+
+        if i >= N_FREE_TOKENS:
+            final_vocab.append(word)
+        matrix[new_i] = vector
+        new_i += 1
+
+    if embedding_dim < spacy_vocab.vectors_length:
+        svd = TruncatedSVD(n_components=embedding_dim, algorithm='arpack')
+        embeddings = svd.fit_transform(matrix)
+        print embeddings.shape
+        print [sum(svd.explained_variance_ratio_[:i]) for i in range(1, embedding_dim + 1)]
+    else:
+        embeddings = matrix
+
+    with open(output_vocab_filepath, 'w') as output:
+        for word in final_vocab:
+            output.write('%s\n' % word)
+    np.save(output_embeddings_filepath, embeddings)
 
 
 def write_dummy_example(out_file):
@@ -145,4 +168,4 @@ if __name__ == '__main__':
     #assert len(sys.argv) == 4
     #write_dummy_example(sys.argv[1])
     #see_vocab_overlap(sys.argv[1], sys.argv[2])
-    compute_reduced_embeddings_original_vocab(sys.argv[1], sys.argv[2], 20000, 128)
+    compute_reduced_embeddings_original_vocab(sys.argv[1], sys.argv[2], sys.argv[3], 20000, 300)

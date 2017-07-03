@@ -31,9 +31,9 @@ START_DECODING = '[START]' # This has a vocab id, which is used at the start of 
 STOP_DECODING = '[STOP]' # This has a vocab id, which is used at the end of untruncated target sequences
 
 # Entity type for out-of-vocab words.
-_PERSON_TOKEN = '[PERSON]'
-_ENTITY_TOKENS = (
-  _PERSON_TOKEN,
+PERSON_TOKEN = '[PERSON]'
+ENTITY_TOKENS = (
+  PERSON_TOKEN,
   '[NORP]',
   '[FACILITY]',
   '[ORG]',
@@ -52,7 +52,7 @@ _ENTITY_TOKENS = (
   '[CARDINAL]',
 )
 # Part of speech for out-of-vocab words.
-_POS_TOKENS = (
+POS_TOKENS = (
   '[ADJ]',
   '[ADP]',
   '[ADV]',
@@ -71,8 +71,10 @@ _POS_TOKENS = (
 )
 UNKNOWN_TOKEN = '[UNK]'
 
-WORD_TYPE_TOKENS = _ENTITY_TOKENS + _POS_TOKENS
-UNKNOWN_TOKENS = _ENTITY_TOKENS + _POS_TOKENS + (UNKNOWN_TOKEN,)
+WORD_TYPE_TOKENS = ENTITY_TOKENS + POS_TOKENS
+UNKNOWN_TOKENS = ENTITY_TOKENS + POS_TOKENS + (UNKNOWN_TOKEN,)
+
+N_FREE_TOKENS = len(UNKNOWN_TOKENS) + 3
 
 class Vocab(object):
   """Vocabulary class for mapping between words and ids (integers)"""
@@ -93,6 +95,7 @@ class Vocab(object):
       self._word_to_id[w] = self._count
       self._id_to_word[self._count] = w
       self._count += 1
+    assert self._count == N_FREE_TOKENS
 
     allowed_chars = set(string.ascii_letters + string.punctuation)
     ascii_plus_period = set(string.ascii_letters + '.')
@@ -101,7 +104,7 @@ class Vocab(object):
     with open(vocab_file, 'r') as vocab_f:
       for line in vocab_f:
         pieces = line.rstrip().split()
-        if len(pieces) != 2:
+        if len(pieces) > 2:
           print 'Warning: incorrectly formatted line in vocabulary file: %s\n' % line
           continue
         w = pieces[0]
@@ -125,6 +128,8 @@ class Vocab(object):
           print "max_size of vocab was specified as %i; we now have %i words. Stopping reading." % (max_size, self._count)
           break
 
+    if max_size != 0 and self._count < max_size:
+      raise Exception('Could not read full vocab of size %d, only %d words found' % (max_size, self._count))
     print "Finished constructing vocabulary of %i total words. Last word added: %s" % (self._count, self._id_to_word[self._count-1])
 
   def word2id(self, word, word_type):
@@ -353,9 +358,9 @@ def parse_word(word):
     real_word = word[:person_id_match.start()]
     person_id = int(word[person_id_match.start() + 1: -1])
     if person_id < PEOPLE_ID_SIZE:
-      return real_word, _PERSON_TOKEN, person_id
+      return real_word, PERSON_TOKEN, person_id
     else:
-      return real_word, _PERSON_TOKEN, -1
+      return real_word, PERSON_TOKEN, -1
 
   word_type_match = re.search(r'(\[.*\])$', word)
   if word_type_match:
