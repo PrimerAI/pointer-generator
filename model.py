@@ -620,4 +620,4 @@ def _coverage_loss(attn_dists, padding_mask):
     covlosses.append(covloss)
     coverage += a # update the coverage vector
   coverage_loss = _mask_and_avg(covlosses, padding_mask)
-  return coverage_loss
+  return 10 * (coverage_loss ** 2)

@@ -69,7 +69,11 @@ class Hypothesis(object):
 
   @property
   def avg_log_prob(self):
-    if any(token < data.N_FREE_TOKENS for token in self.tokens):
+    if any(token < data.N_FREE_TOKENS for token in self.tokens[:-1]):
+      # generated an unknown token
+      return -10. ** 6
+    if 2 < self.tokens[-1] < data.N_FREE_TOKENS:
+      # HACK: prevent last token from being unknown except for STOP_DECODING
       return -10. ** 6
 
     # normalize log probability by number of tokens (otherwise longer sequences always have lower probability)

@@ -1,7 +1,5 @@
 import numpy as np
-import os
 import spacy
-import string
 import struct
 import sys
 from sklearn.decomposition.truncated_svd import TruncatedSVD
@@ -24,13 +22,13 @@ def compute_reduced_embeddings_original_vocab(
         if new_i == vocab_size:
             break
 
-        vector = spacy_vocab[unicode(word)].vector
-        if i >= N_FREE_TOKENS and np.allclose(vector, 0.):
+        if i >= N_FREE_TOKENS and unicode(word) not in spacy_vocab:
             continue
 
         if i >= N_FREE_TOKENS:
             final_vocab.append(word)
-        matrix[new_i] = vector
+
+        matrix[new_i] = spacy_vocab[unicode(word)].vector
         new_i += 1
 
     if embedding_dim < spacy_vocab.vectors_length:

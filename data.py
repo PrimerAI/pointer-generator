@@ -22,16 +22,17 @@ import re
 import string
 import struct
 import csv
+from collections import defaultdict
 from tensorflow.core.example import example_pb2
 
-PEOPLE_ID_SIZE = 32
+PEOPLE_ID_SIZE = 16
 
 PAD_TOKEN = '[PAD]' # This has a vocab id, which is used to pad the encoder input, decoder input and target sequence
 START_DECODING = '[START]' # This has a vocab id, which is used at the start of every decoder input sequence
 STOP_DECODING = '[STOP]' # This has a vocab id, which is used at the end of untruncated target sequences
 
 # Entity type for out-of-vocab words.
-PERSON_TOKENS = tuple('[PERSON_%d]' % i for i in range(32)) + ('[PERSON]',)
+PERSON_TOKENS = tuple('[PERSON_%d]' % i for i in range(PEOPLE_ID_SIZE)) + ('[PERSON]',)
 ENTITY_TOKENS = PERSON_TOKENS + (
   '[NORP]',
   '[FACILITY]',
@@ -218,11 +219,13 @@ def article2ids(article_words, vocab):
       A list of the OOV words in the article (strings), in the order corresponding to their
       temporary article OOV numbers.
     article_id_to_word_id:
-      ---
+      A map of article word id to word id for OOV words. This allows us to convert output ids back
+      into an input id. As the same OOV word may have different UNK tokens, this maps to the
+      majority for that token.
   """
   ids = []
   oovs = []
-  article_id_to_word_id = {} # for OOV ids
+  article_id_to_word_id = defaultdict(list) # for OOV ids
   unk_ids = set(vocab.word2id('', token) for token in UNKNOWN_TOKENS)
 
   for w, word_type in article_words:
@@ -232,9 +235,17 @@ def article2ids(article_words, vocab):
         oovs.append(w)
       oov_num = oovs.index(w) # This is 0 for the first article OOV, 1 for the second article OOV...
       ids.append(vocab.size() + oov_num) # This is e.g. 50000 for the first article OOV, 50001 for the second...
-      article_id_to_word_id[ids[-1]] = i
+      article_id_to_word_id[ids[-1]].append(i)
     else:
       ids.append(i)
+
+  for id_ in article_id_to_word_id:
+    word_id_counts = defaultdict(int)
+    for word_id in article_id_to_word_id[id_]:
+      word_id_counts[word_id] += 1
+    sorted_words = sorted(word_id_counts.items(), key=lambda pair: pair[1], reverse=True)
+    top_word_id = sorted_words[0][0]
+    article_id_to_word_id[id_] = top_word_id
 
   return ids, oovs, article_id_to_word_id
 
@@ -262,8 +273,14 @@ def abstract2ids(abstract_words, vocab, article_oovs):
       if w in article_oovs: # If w is an in-article OOV
         vocab_idx = vocab.size() + article_oovs.index(w) # Map to its temporary article OOV number
         ids.append(vocab_idx)
-      else: # If w is an out-of-article OOV
-        ids.append(i) # Map to a UNK token id
+      else:
+        i2 = vocab.word2id(w, None)
+        if i2 in unk_ids:
+          # w is an out-of-article OOV
+          ids.append(i) # Map to entity if possible
+        else:
+          # w is in vocabulary but labeled as entity
+          ids.append(i2) # Map to actual word
     else:
       ids.append(i)
 
@@ -333,9 +350,14 @@ def show_abs_oovs(abstract, vocab, article_oovs):
         new_words.append("__%s__" % w)
       else: # pointer-generator mode
         if w in article_oovs:
+          # word appeared in article
           new_words.append("__%s__" % w)
-        else:
+        elif vocab.word2id(w, None) in unk_ids:
+          # word is unknown and does not appear in article
           new_words.append("!!__%s__!!" % w)
+        else:
+          # word is known but was labeled as entity
+          new_words.append(w)
     else: # w is in-vocab word
       new_words.append(w)
 
