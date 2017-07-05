@@ -31,6 +31,7 @@ def compute_reduced_embeddings_original_vocab(
         matrix[new_i] = spacy_vocab[unicode(word)].vector
         new_i += 1
 
+    print 'Last word added:', final_vocab[-1]
     if embedding_dim < spacy_vocab.vectors_length:
         svd = TruncatedSVD(n_components=embedding_dim, algorithm='arpack')
         embeddings = svd.fit_transform(matrix)

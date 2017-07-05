@@ -76,13 +76,17 @@ class Hypothesis(object):
       # HACK: prevent last token from being unknown except for STOP_DECODING
       return -10. ** 6
 
-    # normalize log probability by number of tokens (otherwise longer sequences always have lower probability)
-    weights = [
-      (.25 + .75 * p_gen) * (1. - .4 * max(attn_dist))
-      for p_gen, attn_dist in zip(self.p_gens, self.attn_dists)
-    ]
-    weight_sum = sum(weights)
-    return sum(weight / weight_sum * log_prob for weight, log_prob in zip(weights, self.log_probs))
+    # Compute average log_prob per step. Weigh the generative and copy parts equally so that we
+    # don't bias towards sequences of only copying (which have higher log_probs generally).
+    gen_sum = sum(self.p_gens)
+    gen_score = sum(
+      p_gen / gen_sum * log_prob for p_gen, log_prob in zip(self.p_gens, self.log_probs)
+    )
+    copy_sum = sum(1. - p_gen for p_gen in self.p_gens)
+    copy_score = sum(
+      (1. - p_gen) / copy_sum * log_prob for p_gen, log_prob in zip(self.p_gens, self.log_probs)
+    )
+    return .5 * gen_score + .5 * copy_score
 
   @property
   def score(self):

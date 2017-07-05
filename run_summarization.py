@@ -162,8 +162,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
 
       tf.logging.info('running training step...')
       t0 = time.time()
-      use_generated_inputs = FLAGS.corrective_training and np.random.random() < .25
-      results = model.run_train_step(sess, batch, use_generated_inputs)
+      results = model.run_train_step(sess, batch, FLAGS.corrective_training)
       t1 = time.time()
       tf.logging.info('seconds for training step: %.3f', t1 - t0)
 

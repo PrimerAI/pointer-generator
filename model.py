@@ -401,6 +401,8 @@ class SummarizationModel(object):
   def build_graph(self):
     """Add the placeholders, model, global step, train_op and summaries to the graph"""
     tf.logging.info('Building graph...')
+    tf.summary.scalar('max_enc_steps', self._hps.max_enc_steps)
+    tf.summary.scalar('max_dec_steps', self._hps.max_dec_steps)
     t0 = time.time()
     self._add_placeholders()
     with tf.device("/gpu:0"):
@@ -412,7 +414,7 @@ class SummarizationModel(object):
     t1 = time.time()
     tf.logging.info('Time to build graph: %i seconds', t1 - t0)
 
-  def run_train_step(self, sess, batch, use_generated_inputs=False):
+  def run_train_step(self, sess, batch, use_generated_inputs):
     """Runs one training iteration. Returns a dictionary containing train op, summaries, loss, global_step and (optionally) coverage loss."""
     feed_dict, to_return = self._get_train_step_feed_return(
       batch, get_outputs=use_generated_inputs
@@ -446,9 +448,12 @@ class SummarizationModel(object):
     for i in range(self._hps.batch_size):
       output_ids[i, 0] = self._vocab.word2id(START_DECODING, None)
       for t in range(self._hps.max_dec_steps - 1):
-        prob_dist = probs[t, i] / probs[t, i].sum()
-        output_id = np.asscalar(np.random.choice(ids[t, i], size=1, p=prob_dist))
-        output_ids[i, t + 1] = batch.article_id_to_word_ids[i].get(output_id, output_id)
+        if np.random.random() < .2:
+          prob_dist = probs[t, i] / probs[t, i].sum()
+          output_id = np.asscalar(np.random.choice(ids[t, i], size=1, p=prob_dist))
+          output_ids[i, t + 1] = batch.article_id_to_word_ids[i].get(output_id, output_id)
+        else:
+          output_ids[i, t + 1] = batch.dec_batch[i, t + 1]
 
     return output_ids
 
