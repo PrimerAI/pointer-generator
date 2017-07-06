@@ -184,13 +184,10 @@ RAW_ARTICLE_DIRS = (os.path.join(RAW_DATA_DIR, dir) for dir in ('cnn', 'dailymai
 RESULTS_DIR = '/Users/michaelwu/dev/text-summarization/results/'
 RESULTS_ARTICLE_DIR = os.path.join(RESULTS_DIR, 'articles')
 
-def read_article(article_id):
-    with open(os.path.join(article_dir, '%s_article.txt' % article_id)) as f:
-        return unicode(f.read().replace('\t', ' '), 'utf-8')
-
 # tuple of output name, dir, filename
 SUMMARY_OUTPUT_LOCATIONS = (
     ('Reference', os.path.join(RESULTS_DIR, 'abstract'), 'abstract_%d.txt'),
+    ('Tied', os.path.join(RESULTS_DIR, 'decoded'), '%06d_decoded.txt'),
     #('Abisee', os.path.join(abisee_result_dir, 'pointer-gen-cov'), '%s_decoded.txt'),
 )
 
@@ -318,6 +315,6 @@ if __name__ == '__main__':
     #compute_reduced_embeddings_original_vocab(
     #    sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
     #)
-    #write_results()
+    write_results()
     #find_articles(sys.argv[1])
-    generate_input_file(sys.argv[1])
+    #generate_input_file(sys.argv[1])

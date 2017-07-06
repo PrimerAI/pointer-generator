@@ -188,7 +188,8 @@ def run_beam_search(sess, model, vocab, batch):
         # If this hypothesis is sufficiently long, put in results. Otherwise discard.
         if steps >= FLAGS.min_dec_steps:
           results.append(h)
-      else: # hasn't reached stop token, so continue to extend this hypothesis
+      elif h.latest_token >= data.N_FREE_TOKENS:
+        # hasn't reached stop token and generated non-unk token, so continue to extend this hypothesis
         hyps.append(h)
       if len(hyps) == FLAGS.beam_size or len(results) == FLAGS.beam_size:
         # Once we've collected beam_size-many hypotheses for the next step, or beam_size-many complete hypotheses, stop.
