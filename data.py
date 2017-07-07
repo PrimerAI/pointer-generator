@@ -378,10 +378,10 @@ def parse_word(word):
   def find_match(pattern):
     match = re.search(pattern, word)
     if match:
-      return word[:match.start()], word[match.start():]
+      return word[:match.start()], word[match.start(): match.end()]
     return word, ''
 
-  real_word, person_id = find_match(r'(\{.*\})$')
+  real_word, person_id = find_match(r'(\{.*\})')
   if person_id:
     person_id = int(person_id[1: -1])
     if person_id < PEOPLE_ID_SIZE:
@@ -389,7 +389,7 @@ def parse_word(word):
     else:
       return real_word, PERSON_TOKENS[-1]
 
-  real_word, word_type = find_match(r'(\[.*\])$')
+  real_word, word_type = find_match(r'(\[.*\])')
   if word_type:
     if word_type in ENTITY_TOKENS + POS_TOKENS:
       return real_word, word_type

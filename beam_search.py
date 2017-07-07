@@ -69,12 +69,14 @@ class Hypothesis(object):
 
   @property
   def avg_log_prob(self):
-    if any(token < data.N_FREE_TOKENS for token in self.tokens[:-1]):
+    if any(token < data.N_FREE_TOKENS for token in self.tokens[1:-1]):
       # generated an unknown token
       return -10. ** 6
-    if 2 < self.tokens[-1] < data.N_FREE_TOKENS:
+    if self.latest_token < data.N_FREE_TOKENS and self.latest_token != 2:
       # HACK: prevent last token from being unknown except for STOP_DECODING
       return -10. ** 6
+
+    return sum(self.log_probs) / len(self.tokens)
 
     # Compute average log_prob per step. Weigh the generative and copy parts equally so that we
     # don't bias towards sequences of only copying (which have higher log_probs generally).

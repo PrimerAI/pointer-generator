@@ -191,6 +191,8 @@ SUMMARY_OUTPUT_LOCATIONS = (
     #('Abisee', os.path.join(abisee_result_dir, 'pointer-gen-cov'), '%s_decoded.txt'),
 )
 
+N_ARTICLES = 100
+
 SEARCH_TERMS = {
     'tesla',
     'crispr',
@@ -236,7 +238,7 @@ def find_articles(output_dir):
                 articles.append((article, abstract, search_count))
 
     articles.sort(key=lambda info: info[2], reverse=True)
-    for i, (article, abstract, search_count) in enumerate(articles[:100]):
+    for i, (article, abstract, search_count) in enumerate(articles[:N_ARTICLES]):
         article_path = os.path.join(output_article_dir, 'article_%d.txt' % i)
         abstract_path = os.path.join(output_abstract_dir, 'abstract_%d.txt' % i)
 
@@ -289,9 +291,10 @@ def write_results():
 ######################################################
 
 def generate_input_file(out_file):
-    writer = open(out_file, 'wb')
+    data = [None] * N_ARTICLES
 
     for filename in os.listdir(RESULTS_ARTICLE_DIR):
+        article_id = int(filename.split('.')[0].split('_')[1])
         with open(os.path.join(RESULTS_ARTICLE_DIR, filename)) as f:
             article_text = unicode(f.read(), 'utf-8').replace(u'\xa0', ' ')
 
@@ -305,11 +308,14 @@ def generate_input_file(out_file):
         tf_example.features.feature['article'].bytes_list.value.extend([article_processed])
         tf_example.features.feature['abstract'].bytes_list.value.extend([''])
         tf_example_str = tf_example.SerializeToString()
-        str_len = len(tf_example_str)
-        writer.write(struct.pack('q', str_len))
-        writer.write(struct.pack('%ds' % str_len, tf_example_str))
+        data[article_id] = tf_example_str
 
-    writer.close()
+    with open(out_file, 'wb') as f:
+        for tf_example_str in data:
+            str_len = len(tf_example_str)
+            f.write(struct.pack('q', str_len))
+            f.write(struct.pack('%ds' % str_len, tf_example_str))
+
 
 if __name__ == '__main__':
     #compute_reduced_embeddings_original_vocab(

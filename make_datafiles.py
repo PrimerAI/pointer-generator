@@ -114,7 +114,7 @@ class ArticlePreprocesser(multiprocessing.Process):
 
 
 def process_task(input_filename, output_filename):
-  article, abstract = get_art_abs(input_filename)
+  article, abstract = get_art_abs(input_filename, add_periods=True)
   article = unicode(article, 'utf-8').replace(u'\xa0', ' ')
   abstract = unicode(abstract, 'utf-8').replace(u'\xa0', ' ')
   article_tokens, abstract_tokens = process_article_abstract(input_filename, article, abstract)
@@ -247,11 +247,14 @@ def fix_missing_period(line):
   return line + "."
 
 
-def get_art_abs(story_file):
+def get_art_abs(story_file, add_periods):
   lines = read_text_file(story_file)
 
-  # Put periods on the ends of lines that are missing them (this is a problem in the dataset because many image captions don't end in periods; consequently they end up in the body of the article as run-on sentences)
-  lines = [fix_missing_period(line) for line in lines]
+  if add_periods:
+    # Put periods on the ends of lines that are missing them (this is a problem in the dataset
+    # because many image captions don't end in periods; consequently they end up in the body of
+    # the article as run-on sentences)
+    lines = [fix_missing_period(line) for line in lines]
 
   # Separate out article and abstract sentences
   article_lines = []
@@ -300,7 +303,7 @@ def write_to_bin(url_file, cnn_tokenized_stories_dir, dm_tokenized_stories_dir, 
         raise Exception("Tokenized stories directories %s and %s contain correct number of files but story file %s found in neither." % (cnn_tokenized_stories_dir, dm_tokenized_stories_dir, s))
 
       # Get the strings to write to .bin file
-      article, abstract = get_art_abs(story_file)
+      article, abstract = get_art_abs(story_file, add_periods=False)
 
       # Write to tf.Example
       tf_example = example_pb2.Example()

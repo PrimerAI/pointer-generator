@@ -108,7 +108,10 @@ def convert_to_coverage_model():
   sess.run(tf.global_variables_initializer())
 
   # load all non-coverage weights from checkpoint
-  saver = tf.train.Saver([v for v in tf.global_variables() if "coverage" not in v.name and "Adagrad" not in v.name])
+  saver = tf.train.Saver([
+    v for v in tf.global_variables()
+    if not any(part in v.name for part in ("coverage", "Adagrad", "Adam"))
+  ])
   print "restoring non-coverage variables..."
   curr_ckpt = util.load_ckpt(saver, sess)
   print "restored."

@@ -62,7 +62,7 @@ class SummarizationModel(object):
     Args:
       batch: Batch object
       just_enc: Boolean. If True, only feed the parts needed for the encoder.
-      dec_batch: tensor of shape [batch_size, max_enc_steps].
+      dec_batch: tensor of shape [batch_size, max_dec_steps].
     """
     if dec_batch is None:
       dec_batch = batch.dec_batch

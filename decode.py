@@ -95,7 +95,9 @@ class BeamSearchDecoder(object):
       abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab, (batch.art_oovs[0] if FLAGS.pointer_gen else None)) # string
 
       # Run beam search to get best Hypothesis
+      t_beam = time.time()
       best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+      tf.logging.info("Time to decode one example: %f", time.time() - t_beam)
 
       # Extract the output ids from the hypothesis and convert back to words
       output_ids = [int(t) for t in best_hyp.tokens[1:]]
