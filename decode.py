@@ -76,7 +76,6 @@ class BeamSearchDecoder(object):
 
   def decode(self):
     """Decode examples until data is exhausted (if FLAGS.single_pass) and return, or decode indefinitely, loading latest checkpoint at regular intervals"""
-    t0 = time.time()
     counter = 0
     while True:
       batch = self._batcher.next_batch()  # 1 example repeated across batch
@@ -116,14 +115,9 @@ class BeamSearchDecoder(object):
         counter += 1 # this is how many examples we've decoded
       else:
         print_results(article_withunks, abstract_withunks, decoded_output, best_hyp) # log output to screen
-        self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, best_hyp.attn_dists, best_hyp.p_gens) # write info to .json file for visualization tool
+        self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, best_hyp.attn_dists, best_hyp.p_gens, best_hyp.log_probs) # write info to .json file for visualization tool
 
-        # Check if SECS_UNTIL_NEW_CKPT has elapsed; if so return so we can load a new checkpoint
-        t1 = time.time()
-        if t1-t0 > SECS_UNTIL_NEW_CKPT:
-          tf.logging.info('We\'ve been decoding with same checkpoint for %i seconds. Time to load new checkpoint', t1-t0)
-          _ = util.load_ckpt(self._saver, self._sess)
-          t0 = time.time()
+        raw_input()
 
   def break_into_sentences(self, tokens):
     sents = []
@@ -168,7 +162,7 @@ class BeamSearchDecoder(object):
     tf.logging.info("Wrote example %i to file" % ex_index)
 
 
-  def write_for_attnvis(self, article, abstract, decoded_words, attn_dists, p_gens):
+  def write_for_attnvis(self, article, abstract, decoded_words, attn_dists, p_gens, log_probs):
     """Write some data to json file, which can be read into the in-browser attention visualizer tool:
       https://github.com/abisee/attn_vis
 
@@ -185,7 +179,8 @@ class BeamSearchDecoder(object):
         'article_lst': [make_html_safe(t) for t in article_lst],
         'decoded_lst': [make_html_safe(t) for t in decoded_lst],
         'abstract_str': make_html_safe(abstract),
-        'attn_dists': attn_dists
+        'attn_dists': attn_dists,
+        'probs': np.exp(log_probs).tolist(),
     }
     if FLAGS.pointer_gen:
       to_write['p_gens'] = p_gens
