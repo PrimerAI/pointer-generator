@@ -188,9 +188,10 @@ RESULTS_ABSTRACT_DIR = os.path.join(RESULTS_DIR, 'abstract')
 # tuple of output name, dir, filename
 SUMMARY_OUTPUT_LOCATIONS = (
     ('Reference', RESULTS_ABSTRACT_DIR, 'abstract_%d.txt'),
-    ('M1', os.path.join(RESULTS_DIR, 'decoded_normal'), '%06d_decoded.txt'),
-    ('M2', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
-    ('M3', os.path.join(RESULTS_DIR, 'decoded_corrective'), '%06d_decoded.txt'),
+    #('Normal', os.path.join(RESULTS_DIR, 'decoded_normal'), '%06d_decoded.txt'),
+    ('Coverage', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
+    ('Coverage v2', os.path.join(RESULTS_DIR, 'decoded_coverage_2'), '%06d_decoded.txt'),
+    ('Corrective', os.path.join(RESULTS_DIR, 'decoded_corrective'), '%06d_decoded.txt'),
     #('Abisee', os.path.join(abisee_result_dir, 'pointer-gen-cov'), '%s_decoded.txt'),
 )
 

@@ -94,27 +94,30 @@ class Hypothesis(object):
     return .5 * gen_score + .5 * copy_score
     """
 
-  def score(self, stop_token_id, period_id, stopword_ids, pronoun_ids):
+  def score(self, stop_token_id, start_sent_ids, stopword_ids, pronoun_ids):
     if self._has_unknown_token(stop_token_id):
       return -10 ** 6
 
-    avg_log_prob = self._smart_avg_log_prob(period_id, stopword_ids, pronoun_ids)
+    avg_log_prob = self._smart_avg_log_prob(start_sent_ids, stopword_ids, pronoun_ids)
     return avg_log_prob - self.repeated_n_gram_loss - self.cov_loss
 
-  def _smart_avg_log_prob(self, period_id, stopword_ids, pronoun_ids):
-    weights = np.ones((len(self.tokens),), dtype=np.float32)
+  def _smart_avg_log_prob(self, start_sent_ids, stopword_ids, pronoun_ids):
+    sentence_start_weights = np.zeros((len(self.tokens),), dtype=np.float32)
     log_probs = np.array(self.log_probs)
 
     for i, token in enumerate(self.tokens):
-      if token == period_id:
+      if token in start_sent_ids:
         for j in range(i + 1, min(len(self.tokens), i + 5)):
           if self.tokens[j] not in stopword_ids:
-            weights[j] = 16. / (j - i + 5)
+            sentence_start_weights[j] = 1. / (j - i + 5)
 
       if token in pronoun_ids:
         log_probs[i] -= .8
 
-    return weights.dot(log_probs) / weights.sum()
+    sentence_start_weights /= sentence_start_weights.sum()
+    sentence_start_log_probs = sentence_start_weights.dot(log_probs)
+
+    return .75 * log_probs.mean() + .25 * sentence_start_log_probs
 
   @property
   def avg_top_attn(self):
@@ -173,7 +176,7 @@ def run_beam_search(sess, model, vocab, batch):
   results = [] # this will contain finished hypotheses (those that have emitted the [STOP] token)
 
   stop_token_id = vocab.word2id(data.STOP_DECODING, None)
-  period_id = vocab.word2id('.', None)
+  start_sent_ids = {vocab.word2id(word, None) for word in (data.START_DECODING, '.')}
   stopword_ids = {vocab.word2id(word, None) for word in (
     'the', 'a', 'an', 'it', 'its', 'this', 'that', 'these', 'those'
   )}
@@ -216,7 +219,7 @@ def run_beam_search(sess, model, vocab, batch):
 
     # Filter and collect any hypotheses that have produced the end token.
     hyps = [] # will contain hypotheses for the next step
-    for h in sort_hyps(all_hyps, stop_token_id, period_id, stopword_ids, pronoun_ids): # in order of most likely h
+    for h in sort_hyps(all_hyps, stop_token_id, start_sent_ids, stopword_ids, pronoun_ids): # in order of most likely h
       if h.latest_token == vocab.word2id(data.STOP_DECODING, None): # if stop token is reached...
         # If this hypothesis is sufficiently long, put in results. Otherwise discard.
         if steps >= FLAGS.min_dec_steps:
@@ -236,15 +239,15 @@ def run_beam_search(sess, model, vocab, batch):
     results = hyps
 
   # Sort hypotheses by average log probability
-  hyps_sorted = sort_hyps(results, stop_token_id, period_id, stopword_ids, pronoun_ids)
+  hyps_sorted = sort_hyps(results, stop_token_id, start_sent_ids, stopword_ids, pronoun_ids)
 
   # Return the hypothesis with highest average log prob
   return hyps_sorted[0]
 
-def sort_hyps(hyps, stop_token_id, period_id, stopword_ids, pronoun_ids):
+def sort_hyps(hyps, stop_token_id, start_sent_ids, stopword_ids, pronoun_ids):
   """Return a list of Hypothesis objects, sorted by descending average log probability"""
   if FLAGS.smart_decode:
-    score_func = lambda h: h.score(stop_token_id, period_id, stopword_ids, pronoun_ids)
+    score_func = lambda h: h.score(stop_token_id, start_sent_ids, stopword_ids, pronoun_ids)
   else:
     score_func = lambda h: h.avg_log_prob(stop_token_id)
 
