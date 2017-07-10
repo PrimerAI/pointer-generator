@@ -51,18 +51,15 @@ class Example(object):
 
     self.enc_len = len(article_words) # store the length after truncation but before padding
     # list of word ids; OOVs are represented by the id for UNK token
-    self.enc_input = [vocab.word2id(w, word_type) for w, word_type, person_id in article_words]
-    # list of person ids
-    self.enc_input_people = [person_id for w, word_type, person_id in article_words]
+    self.enc_input = [vocab.word2id(w, word_type) for w, word_type in article_words]
 
     # Process the abstract
     abstract_words = [data.parse_word(word) for word in abstract.split()]
-    abs_ids = [vocab.word2id(w, word_type) for w, word_type, person_id in abstract_words] # list of word ids; OOVs are represented by the id for UNK token
-    abs_people_ids = [person_id for w, word_type, person_id in abstract_words]
+    abs_ids = [vocab.word2id(w, word_type) for w, word_type in abstract_words] # list of word ids; OOVs are represented by the id for UNK token
 
     # Get the decoder input sequence and target sequence
-    self.dec_input, self.target, self.dec_input_people = self.get_dec_inp_targ_seqs(
-      abs_ids, hps.max_dec_steps, start_decoding, stop_decoding, abs_people_ids
+    self.dec_input, self.target = self.get_dec_inp_targ_seqs(
+      abs_ids, hps.max_dec_steps, start_decoding, stop_decoding
     )
     self.dec_len = len(self.dec_input)
 
@@ -72,17 +69,13 @@ class Example(object):
       self.enc_input_extend_vocab, self.article_oovs, self.article_id_to_word_id = (
         data.article2ids(article_words, vocab)
       )
-      # map of article word id to person id
-      self.article_id_to_person_id = self._get_word_person_map(
-        self.enc_input_extend_vocab, self.enc_input_people
-      )
 
       # Get a verison of the reference summary where in-article OOVs are represented by their temporary article OOV id
       abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
 
       # Overwrite decoder target sequence so it uses the temp article OOV ids
-      _, self.target, _ = self.get_dec_inp_targ_seqs(
-        abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding, abs_people_ids
+      _, self.target = self.get_dec_inp_targ_seqs(
+        abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding
       )
 
     # Store the original strings
@@ -90,7 +83,7 @@ class Example(object):
     self.original_abstract = abstract
 
 
-  def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id, people_seq):
+  def get_dec_inp_targ_seqs(self, sequence, max_len, start_id, stop_id):
     """
     Given the reference summary as a sequence of tokens, return the input sequence for the decoder,
     and the target sequence which we will use to calculate loss. The sequence will be truncated if
@@ -102,26 +95,21 @@ class Example(object):
       max_len: integer
       start_id: integer
       stop_id: integer
-      people_seq: list of ids
 
     Returns:
       inp: sequence length <=max_len starting with start_id
       target: sequence same length as input, ending with stop_id only if there was no truncation
-      people_ids: sequence same length as input
     """
     inp = [start_id] + sequence[:]
     target = sequence[:]
-    people_info = [-1] + people_seq[:]
 
     if len(inp) > max_len: # truncate
       inp = inp[:max_len]
       target = target[:max_len] # no end_token
-      people_info = people_info[:max_len]
     else: # no truncation
       target.append(stop_id) # end token
     assert len(inp) == len(target)
-    assert len(inp) == len(people_info)
-    return inp, target, people_info
+    return inp, target
 
 
   def pad_decoder_inp_targ(self, max_len, pad_id):
@@ -130,33 +118,16 @@ class Example(object):
       self.dec_input.append(pad_id)
     while len(self.target) < max_len:
       self.target.append(pad_id)
-    while len(self.dec_input_people) < max_len:
-      self.dec_input_people.append(-1)
 
 
   def pad_encoder_input(self, max_len, pad_id):
     """Pad the encoder input sequence with pad_id up to max_len."""
     while len(self.enc_input) < max_len:
       self.enc_input.append(pad_id)
-      self.enc_input_people.append(-1)
 
     if self.hps.pointer_gen:
       while len(self.enc_input_extend_vocab) < max_len:
         self.enc_input_extend_vocab.append(pad_id)
-
-
-  def _get_word_person_map(self, word_ids, people_ids):
-    """
-    Best effort to map article's word ids to its people ids
-    """
-    non_person_words = set(
-      word_id for word_id, person_id in zip(word_ids, people_ids) if person_id == -1
-    )
-    return {
-      word_id: person_id
-      for word_id, person_id in zip(word_ids, people_ids)
-      if person_id != -1 and word_id not in non_person_words
-    }
 
 
 class Batch(object):
@@ -181,8 +152,6 @@ class Batch(object):
           numpy array of shape (batch_size, <=max_enc_steps) containing integer ids (all OOVs represented by UNK id), padded to length of longest sequence in the batch
         self.enc_lens:
           numpy array of shape (batch_size) containing integers. The (truncated) length of each encoder input sequence (pre-padding).
-        self.enc_batch_people:
-          numpy array of same shape as enc_batch of person ids
 
       If hps.pointer_gen, additionally initializes the following:
         self.max_art_oovs:
@@ -203,13 +172,11 @@ class Batch(object):
     # Note: our enc_batch can have different length (second dimension) for each batch because we use dynamic_rnn for the encoder.
     self.enc_batch = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
     self.enc_lens = np.zeros((hps.batch_size), dtype=np.int32)
-    self.enc_batch_people = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
 
     # Fill in the numpy arrays
     for i, ex in enumerate(example_list):
       self.enc_batch[i, :] = ex.enc_input[:]
       self.enc_lens[i] = ex.enc_len
-      self.enc_batch_people[i, :] = ex.enc_input_people[:]
 
     # For pointer-generator mode, need to store some extra info
     if hps.pointer_gen:
@@ -222,8 +189,7 @@ class Batch(object):
       for i, ex in enumerate(example_list):
         self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
-      self.article_id_to_word_id_DECODE = example_list[0].article_id_to_word_id
-      self.article_id_to_person_id_DECODE = example_list[0].article_id_to_person_id
+      self.article_id_to_word_ids = [example.article_id_to_word_id for example in example_list]
 
   def init_decoder_seq(self, example_list, hps):
     """Initializes the following:
@@ -241,14 +207,12 @@ class Batch(object):
     # Initialize the numpy arrays.
     # Note: our decoder inputs and targets must be the same length for each batch (second dimension = max_dec_steps) because we do not use a dynamic_rnn for decoding. However I believe this is possible, or will soon be possible, with Tensorflow 1.0, in which case it may be best to upgrade to that.
     self.dec_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
-    self.dec_batch_people = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
     self.target_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
     self.padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
 
     # Fill in the numpy arrays
     for i, ex in enumerate(example_list):
       self.dec_batch[i, :] = ex.dec_input[:]
-      self.dec_batch_people[i, :] = ex.dec_input_people[:]
       self.target_batch[i, :] = ex.target[:]
       for j in xrange(ex.dec_len):
         self.padding_mask[i][j] = 1
@@ -282,7 +246,7 @@ class Batcher(object):
     self._example_queue = Queue.Queue(self.BATCH_QUEUE_MAX * self._hps.batch_size)
 
     # Different settings depending on whether we're in single_pass mode or not
-    if single_pass:
+    if single_pass or 'sample' in data_path:
       self._num_example_q_threads = 1 # just one thread, so we read through the dataset just once
       self._num_batch_q_threads = 1  # just one thread to batch examples
       self._bucketing_cache_size = 1 # only load one batch's worth of examples before bucketing; this essentially means no bucketing

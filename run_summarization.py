@@ -38,20 +38,22 @@ tf.app.flags.DEFINE_string('embeddings_path', '', 'For the start of training, if
 # Important settings
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
 tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a fixed checkpoint, i.e. take the current checkpoint, and use it to produce one summary for each example in the dataset, write the summaries to file and then get ROUGE scores for the whole dataset. If False (default), run concurrent decoding, i.e. repeatedly load latest checkpoint, use it to produce summaries for randomly-chosen examples and log the results to screen, indefinitely.')
+tf.app.flags.DEFINE_boolean('smart_decode', False, 'For decode mode only. If True, avoid repetition in the output using coverage loss and preventing repeated 3-grams.')
+tf.app.flags.DEFINE_boolean('restrictive_embeddings', False, 'If True, then restricts word embeddings to be a linear transform of the pretrained embeddings.')
 
 # Where to save output
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in a directory with this name, under log_root.')
 
 # Hyperparameters
-tf.app.flags.DEFINE_integer('hidden_dim', 256, 'dimension of RNN hidden states')
+tf.app.flags.DEFINE_integer('enc_hidden_dim', 256, 'dimension of RNN hidden states')
+tf.app.flags.DEFINE_integer('dec_hidden_dim', 400, 'dimension of RNN hidden states')
 tf.app.flags.DEFINE_integer('emb_dim', 128, 'dimension of word embeddings')
 tf.app.flags.DEFINE_integer('batch_size', 16, 'minibatch size')
 tf.app.flags.DEFINE_integer('max_enc_steps', 400, 'max timesteps of encoder (max source text tokens)')
 tf.app.flags.DEFINE_integer('max_dec_steps', 100, 'max timesteps of decoder (max summary tokens)')
 tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding.')
 tf.app.flags.DEFINE_integer('min_dec_steps', 35, 'Minimum sequence length of generated summary. Applies only for beam search decoding mode')
-tf.app.flags.DEFINE_integer('vocab_size', 20000, 'Size of vocabulary. These will be read from the vocabulary file in order. If the vocabulary file contains fewer words than this number, or if this number is set to 0, will take all words in the vocabulary file.')
 tf.app.flags.DEFINE_float('lr', 0.15, 'learning rate')
 tf.app.flags.DEFINE_float('adagrad_init_acc', 0.1, 'initial accumulator value for Adagrad')
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
@@ -61,10 +63,12 @@ tf.app.flags.DEFINE_float('max_grad_norm', 2.0, 'for gradient clipping')
 # Pointer-generator or baseline model
 tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
 
-# Coverage hyperparameters
+# Training hyperparameters
+tf.app.flags.DEFINE_boolean('adam_optimizer', False, 'Use Adam optimizer instead of Adagrad.')
 tf.app.flags.DEFINE_boolean('coverage', False, 'Use coverage mechanism. Note, the experiments reported in the ACL paper train WITHOUT coverage until converged, and then train for a short phase WITH coverage afterwards. i.e. to reproduce the results in the ACL paper, turn this off for most of training then turn on for a short phase at the end.')
 tf.app.flags.DEFINE_float('cov_loss_wt', 1.0, 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
 tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-coverage model to a coverage model. Turn this on and run in train mode. Your current model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
+tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
 
 
 def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay):
@@ -104,7 +108,10 @@ def convert_to_coverage_model():
   sess.run(tf.global_variables_initializer())
 
   # load all non-coverage weights from checkpoint
-  saver = tf.train.Saver([v for v in tf.global_variables() if "coverage" not in v.name and "Adagrad" not in v.name])
+  saver = tf.train.Saver([
+    v for v in tf.global_variables()
+    if not any(part in v.name for part in ("coverage", "Adagrad", "Adam"))
+  ])
   print "restoring non-coverage variables..."
   curr_ckpt = util.load_ckpt(saver, sess)
   print "restored."
@@ -157,10 +164,10 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
       batch = batcher.next_batch()
 
       tf.logging.info('running training step...')
-      t0=time.time()
-      results = model.run_train_step(sess, batch)
-      t1=time.time()
-      tf.logging.info('seconds for training step: %.3f', t1-t0)
+      t0 = time.time()
+      results = model.run_train_step(sess, batch, FLAGS.corrective_training)
+      t1 = time.time()
+      tf.logging.info('seconds for training step: %.3f', t1 - t0)
 
       loss = results['loss']
       tf.logging.info('loss: %f', loss) # print the loss to screen
@@ -241,7 +248,8 @@ def main(unused_argv):
     else:
       raise Exception("Logdir %s doesn't exist. Run in train mode to create it." % (FLAGS.log_root))
 
-  vocab = Vocab(FLAGS.vocab_path, FLAGS.vocab_size) # create a vocabulary
+  vocab_size = 50000 if FLAGS.restrictive_embeddings else 20000
+  vocab = Vocab(FLAGS.vocab_path, vocab_size) # create a vocabulary
 
   # If in decode mode, set batch_size = beam_size
   # Reason: in decode mode, we decode one example at a time.
@@ -253,8 +261,29 @@ def main(unused_argv):
   if FLAGS.single_pass and FLAGS.mode!='decode':
     raise Exception("The single_pass flag should only be True in decode mode")
 
+  if FLAGS.restrictive_embeddings and not FLAGS.embeddings_path:
+    raise Exception("Cannot use restrictive embeddings with no pretrained embeddings")
+
   # Make a namedtuple hps, containing the values of the hyperparameters that the model needs
-  hparam_list = ['mode', 'lr', 'adagrad_init_acc', 'rand_unif_init_mag', 'trunc_norm_init_std', 'max_grad_norm', 'hidden_dim', 'emb_dim', 'batch_size', 'max_dec_steps', 'max_enc_steps', 'coverage', 'cov_loss_wt', 'pointer_gen']
+  hparam_list = {
+    'mode',
+    'lr',
+    'adagrad_init_acc',
+    'rand_unif_init_mag',
+    'trunc_norm_init_std',
+    'max_grad_norm',
+    'enc_hidden_dim',
+    'dec_hidden_dim',
+    'emb_dim',
+    'batch_size',
+    'max_dec_steps',
+    'max_enc_steps',
+    'coverage',
+    'cov_loss_wt',
+    'pointer_gen',
+    'restrictive_embeddings',
+    'adam_optimizer',
+  }
   hps_dict = {}
   for key,val in FLAGS.__flags.iteritems(): # for each flag
     if key in hparam_list: # if it's in the list

@@ -22,6 +22,7 @@ import re
 import string
 import struct
 import csv
+from collections import defaultdict
 from tensorflow.core.example import example_pb2
 
 PEOPLE_ID_SIZE = 16
@@ -31,9 +32,8 @@ START_DECODING = '[START]' # This has a vocab id, which is used at the start of 
 STOP_DECODING = '[STOP]' # This has a vocab id, which is used at the end of untruncated target sequences
 
 # Entity type for out-of-vocab words.
-_PERSON_TOKEN = '[PERSON]'
-_ENTITY_TOKENS = (
-  _PERSON_TOKEN,
+PERSON_TOKENS = tuple('[PERSON_%d]' % i for i in range(PEOPLE_ID_SIZE)) + ('[PERSON]',)
+ENTITY_TOKENS = PERSON_TOKENS + (
   '[NORP]',
   '[FACILITY]',
   '[ORG]',
@@ -52,7 +52,7 @@ _ENTITY_TOKENS = (
   '[CARDINAL]',
 )
 # Part of speech for out-of-vocab words.
-_POS_TOKENS = (
+POS_TOKENS = (
   '[ADJ]',
   '[ADP]',
   '[ADV]',
@@ -71,8 +71,9 @@ _POS_TOKENS = (
 )
 UNKNOWN_TOKEN = '[UNK]'
 
-WORD_TYPE_TOKENS = _ENTITY_TOKENS + _POS_TOKENS
-UNKNOWN_TOKENS = _ENTITY_TOKENS + _POS_TOKENS + (UNKNOWN_TOKEN,)
+UNKNOWN_TOKENS = ENTITY_TOKENS + POS_TOKENS + (UNKNOWN_TOKEN,)
+
+N_FREE_TOKENS = len(UNKNOWN_TOKENS) + 3
 
 class Vocab(object):
   """Vocabulary class for mapping between words and ids (integers)"""
@@ -88,11 +89,12 @@ class Vocab(object):
     self._count = 0 # keeps track of total number of words in the Vocab
     allowed_chars = set(string.letters + string.punctuation)
 
-    # [UNK], [PAD], [START], [STOP], and the UNKNOWN_TOKENS get the ids 0,1,2,3...
-    for w in (UNKNOWN_TOKEN, PAD_TOKEN, START_DECODING, STOP_DECODING) + WORD_TYPE_TOKENS:
+    # [PAD], [START], [STOP], and the UNKNOWN_TOKENS get the ids 0,1,2,3...
+    for w in (PAD_TOKEN, START_DECODING, STOP_DECODING) + UNKNOWN_TOKENS:
       self._word_to_id[w] = self._count
       self._id_to_word[self._count] = w
       self._count += 1
+    assert self._count == N_FREE_TOKENS
 
     allowed_chars = set(string.ascii_letters + string.punctuation)
     ascii_plus_period = set(string.ascii_letters + '.')
@@ -101,7 +103,7 @@ class Vocab(object):
     with open(vocab_file, 'r') as vocab_f:
       for line in vocab_f:
         pieces = line.rstrip().split()
-        if len(pieces) != 2:
+        if len(pieces) > 2:
           print 'Warning: incorrectly formatted line in vocabulary file: %s\n' % line
           continue
         w = pieces[0]
@@ -125,15 +127,19 @@ class Vocab(object):
           print "max_size of vocab was specified as %i; we now have %i words. Stopping reading." % (max_size, self._count)
           break
 
+    if max_size != 0 and self._count < max_size:
+      raise Exception('Could not read full vocab of size %d, only %d words found' % (max_size, self._count))
     print "Finished constructing vocabulary of %i total words. Last word added: %s" % (self._count, self._id_to_word[self._count-1])
 
   def word2id(self, word, word_type):
     """Returns the id (integer) of a word (string). Returns [UNK] id if word is OOV."""
-    if word_type in WORD_TYPE_TOKENS:
+    if word_type in ENTITY_TOKENS:
       return self._word_to_id[word_type]
-    if word not in self._word_to_id:
-      return self._word_to_id[UNKNOWN_TOKEN]
-    return self._word_to_id[word]
+    if word in self._word_to_id:
+      return self._word_to_id[word]
+    if word_type in POS_TOKENS:
+      return self._word_to_id[word_type]
+    return self._word_to_id[UNKNOWN_TOKEN]
 
   def id2word(self, word_id):
     """Returns the word (string) corresponding to an id (integer)."""
@@ -201,7 +207,7 @@ def article2ids(article_words, vocab):
   Map the article words to their ids. Also return a list of OOVs in the article.
 
   Args:
-    article_words: list of (word (string, word_type, person_id) tuples
+    article_words: list of (word (string, word_type) tuples
     vocab: Vocabulary object
 
   Returns:
@@ -213,23 +219,33 @@ def article2ids(article_words, vocab):
       A list of the OOV words in the article (strings), in the order corresponding to their
       temporary article OOV numbers.
     article_id_to_word_id:
-      ---
+      A map of article word id to word id for OOV words. This allows us to convert output ids back
+      into an input id. As the same OOV word may have different UNK tokens, this maps to the
+      majority for that token.
   """
   ids = []
   oovs = []
-  article_id_to_word_id = {} # for OOV ids
+  article_id_to_word_id = defaultdict(list) # for OOV ids
   unk_ids = set(vocab.word2id('', token) for token in UNKNOWN_TOKENS)
 
-  for w, word_type, person_id in article_words:
+  for w, word_type in article_words:
     i = vocab.word2id(w, word_type)
     if i in unk_ids: # If w is OOV
       if w not in oovs: # Add to list of OOVs
         oovs.append(w)
       oov_num = oovs.index(w) # This is 0 for the first article OOV, 1 for the second article OOV...
       ids.append(vocab.size() + oov_num) # This is e.g. 50000 for the first article OOV, 50001 for the second...
-      article_id_to_word_id[ids[-1]] = i
+      article_id_to_word_id[ids[-1]].append(i)
     else:
       ids.append(i)
+
+  for id_ in article_id_to_word_id:
+    word_id_counts = defaultdict(int)
+    for word_id in article_id_to_word_id[id_]:
+      word_id_counts[word_id] += 1
+    sorted_words = sorted(word_id_counts.items(), key=lambda pair: pair[1], reverse=True)
+    top_word_id = sorted_words[0][0]
+    article_id_to_word_id[id_] = top_word_id
 
   return ids, oovs, article_id_to_word_id
 
@@ -239,7 +255,7 @@ def abstract2ids(abstract_words, vocab, article_oovs):
   Map the abstract words to their ids. In-article OOVs are mapped to their temporary OOV numbers.
 
   Args:
-    abstract_words: list of (word (string), word_type, person_id) tuples
+    abstract_words: list of (word (string), word_type) tuples
     vocab: Vocabulary object
     article_oovs: list of in-article OOV words (strings), in the order corresponding to their
       temporary article OOV numbers
@@ -251,14 +267,20 @@ def abstract2ids(abstract_words, vocab, article_oovs):
   ids = []
   unk_ids = set(vocab.word2id('', token) for token in UNKNOWN_TOKENS)
 
-  for w, word_type, person_id in abstract_words:
+  for w, word_type in abstract_words:
     i = vocab.word2id(w, word_type)
     if i in unk_ids: # If w is an OOV word
       if w in article_oovs: # If w is an in-article OOV
         vocab_idx = vocab.size() + article_oovs.index(w) # Map to its temporary article OOV number
         ids.append(vocab_idx)
-      else: # If w is an out-of-article OOV
-        ids.append(i) # Map to a UNK token id
+      else:
+        i2 = vocab.word2id(w, None)
+        if i2 in unk_ids:
+          # w is an out-of-article OOV
+          ids.append(i) # Map to entity if possible
+        else:
+          # w is in vocabulary but labeled as entity
+          ids.append(i2) # Map to actual word
     else:
       ids.append(i)
 
@@ -301,7 +323,7 @@ def show_art_oovs(article, vocab):
   words = [parse_word(word) for word in article.split(' ')]
   words = [
     ("__%s__" % w) if vocab.word2id(w, word_type) in unk_ids else w
-    for w, word_type, person_id in words
+    for w, word_type in words
   ]
 
   out_str = ' '.join(words)
@@ -322,15 +344,20 @@ def show_abs_oovs(abstract, vocab, article_oovs):
   words = [parse_word(word) for word in abstract.split(' ')]
   new_words = []
 
-  for w, word_type, person_id in words:
+  for w, word_type in words:
     if vocab.word2id(w, word_type) in unk_ids: # w is oov
       if article_oovs is None: # baseline mode
         new_words.append("__%s__" % w)
       else: # pointer-generator mode
         if w in article_oovs:
+          # word appeared in article
           new_words.append("__%s__" % w)
-        else:
+        elif vocab.word2id(w, None) in unk_ids:
+          # word is unknown and does not appear in article
           new_words.append("!!__%s__!!" % w)
+        else:
+          # word is known but was labeled as entity
+          new_words.append(w)
     else: # w is in-vocab word
       new_words.append(w)
 
@@ -340,30 +367,33 @@ def show_abs_oovs(abstract, vocab, article_oovs):
 
 def parse_word(word):
   """
-  Returns (word, word_type, person_id) where
+  Returns (word, word_type).
+   
+  word can be of the form:
   
-  - person_id exists if the word is of the form 'word{person_id}'.
-  - person_id is -1 otherwise
-  - word_type exists if the word is of the form 'word[word_type]'. 
-  
-  Only one of those two forms is possible at a time.
+  - "word{i}" -> word, PERSON_i
+  - "word[POS]" -> word, POS
+  - "word" -> word, None
   """
-  person_id_match = re.search(r'(\{.*\})$', word)
-  if person_id_match:
-    real_word = word[:person_id_match.start()]
-    person_id = int(word[person_id_match.start() + 1: -1])
+  def find_match(pattern):
+    match = re.search(pattern, word)
+    if match:
+      return word[:match.start()], word[match.start(): match.end()]
+    return word, ''
+
+  real_word, person_id = find_match(r'(\{.*\})')
+  if person_id:
+    person_id = int(person_id[1: -1])
     if person_id < PEOPLE_ID_SIZE:
-      return real_word, _PERSON_TOKEN, person_id
+      return real_word, PERSON_TOKENS[person_id]
     else:
-      return real_word, _PERSON_TOKEN, -1
+      return real_word, PERSON_TOKENS[-1]
 
-  word_type_match = re.search(r'(\[.*\])$', word)
-  if word_type_match:
-    real_word = word[:word_type_match.start()]
-    word_type = word[word_type_match.start():]
-    if word_type in WORD_TYPE_TOKENS:
-      return real_word, word_type, -1
+  real_word, word_type = find_match(r'(\[.*\])')
+  if word_type:
+    if word_type in ENTITY_TOKENS + POS_TOKENS:
+      return real_word, word_type
     else:
-      return real_word, None, -1
+      return real_word, None
 
-  return word, None, -1
+  return word, None

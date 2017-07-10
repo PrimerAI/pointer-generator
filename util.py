@@ -18,7 +18,9 @@
 
 import tensorflow as tf
 import time
+import traceback
 import os
+
 FLAGS = tf.app.flags.FLAGS
 
 def get_config():
@@ -36,6 +38,7 @@ def load_ckpt(saver, sess):
       tf.logging.info('Loading checkpoint %s', ckpt_state.model_checkpoint_path)
       saver.restore(sess, ckpt_state.model_checkpoint_path)
       return ckpt_state.model_checkpoint_path
-    except:
+    except Exception as e:
+      tf.logging.info(str(e))
       tf.logging.info("Failed to load checkpoint from %s. Sleeping for %i secs...", train_dir, 10)
       time.sleep(10)
