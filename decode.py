@@ -114,7 +114,10 @@ class BeamSearchDecoder(object):
         self.write_for_rouge(original_abstract, decoded_words, counter) # write ref summary and decoded summary to file, to eval with pyrouge later
         counter += 1 # this is how many examples we've decoded
       else:
-        print_results(article_withunks, abstract_withunks, decoded_output, best_hyp) # log output to screen
+        print_results(
+          article_withunks, abstract_withunks, decoded_output, best_hyp,
+          self._vocab.word2id(data.STOP_DECODING, None)
+        ) # log output to screen
         self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, best_hyp.attn_dists, best_hyp.p_gens, best_hyp.log_probs) # write info to .json file for visualization tool
 
         raw_input()
@@ -190,13 +193,13 @@ class BeamSearchDecoder(object):
     tf.logging.info('Wrote visualization data to %s', output_fname)
 
 
-def print_results(article, abstract, decoded_output, hyp):
+def print_results(article, abstract, decoded_output, hyp, stop_token):
   """Prints the article, the reference summmary and the decoded summary to screen"""
   print ""
   tf.logging.info('ARTICLE:  %s', article)
   tf.logging.info('REFERENCE SUMMARY: %s', abstract)
   tf.logging.info('GENERATED SUMMARY: %s', decoded_output)
-  tf.logging.info('LOG_PROB & COV_LOSS: %f, %f', hyp.avg_log_prob, hyp.cov_loss)
+  tf.logging.info('LOG_PROB & COV_LOSS: %f, %f', hyp.avg_log_prob(stop_token), hyp.cov_loss)
   print ""
 
 

@@ -246,7 +246,7 @@ class Batcher(object):
     self._example_queue = Queue.Queue(self.BATCH_QUEUE_MAX * self._hps.batch_size)
 
     # Different settings depending on whether we're in single_pass mode or not
-    if single_pass:
+    if single_pass or 'sample' in data_path:
       self._num_example_q_threads = 1 # just one thread, so we read through the dataset just once
       self._num_batch_q_threads = 1  # just one thread to batch examples
       self._bucketing_cache_size = 1 # only load one batch's worth of examples before bucketing; this essentially means no bucketing

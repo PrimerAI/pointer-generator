@@ -183,11 +183,14 @@ RAW_ARTICLE_DIRS = (os.path.join(RAW_DATA_DIR, dir) for dir in ('cnn', 'dailymai
 
 RESULTS_DIR = '/Users/michaelwu/dev/text-summarization/results/'
 RESULTS_ARTICLE_DIR = os.path.join(RESULTS_DIR, 'articles')
+RESULTS_ABSTRACT_DIR = os.path.join(RESULTS_DIR, 'abstract')
 
 # tuple of output name, dir, filename
 SUMMARY_OUTPUT_LOCATIONS = (
-    ('Reference', os.path.join(RESULTS_DIR, 'abstract'), 'abstract_%d.txt'),
-    ('Tied', os.path.join(RESULTS_DIR, 'decoded'), '%06d_decoded.txt'),
+    ('Reference', RESULTS_ABSTRACT_DIR, 'abstract_%d.txt'),
+    ('M1', os.path.join(RESULTS_DIR, 'decoded_normal'), '%06d_decoded.txt'),
+    ('M2', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
+    ('M3', os.path.join(RESULTS_DIR, 'decoded_corrective'), '%06d_decoded.txt'),
     #('Abisee', os.path.join(abisee_result_dir, 'pointer-gen-cov'), '%s_decoded.txt'),
 )
 
@@ -209,22 +212,20 @@ SEARCH_TERMS = {
     'zuckerburg',
 }
 
-def find_articles(output_dir):
-    if os.path.exists(output_dir):
+def find_articles():
+    if os.path.exists(RESULTS_DIR):
         raise Exception
 
-    output_article_dir = os.path.join(output_dir, 'articles')
-    output_abstract_dir = os.path.join(output_dir, 'abstract')
-    os.mkdir(output_dir)
-    os.mkdir(output_article_dir)
-    os.mkdir(output_abstract_dir)
+    os.mkdir(RESULTS_DIR)
+    os.mkdir(RESULTS_ARTICLE_DIR)
+    os.mkdir(RESULTS_ABSTRACT_DIR)
 
     articles = []
 
     for article_dir in RAW_ARTICLE_DIRS:
         for filename in os.listdir(article_dir):
             article_path = os.path.join(article_dir, filename)
-            article, abstract = get_art_abs(article_path)
+            article, abstract = get_art_abs(article_path, add_periods=True)
 
             article_words = article.lower().split()
             full_article_words = set(
@@ -239,8 +240,11 @@ def find_articles(output_dir):
 
     articles.sort(key=lambda info: info[2], reverse=True)
     for i, (article, abstract, search_count) in enumerate(articles[:N_ARTICLES]):
-        article_path = os.path.join(output_article_dir, 'article_%d.txt' % i)
-        abstract_path = os.path.join(output_abstract_dir, 'abstract_%d.txt' % i)
+        article_path = os.path.join(RESULTS_ARTICLE_DIR, 'article_%d.txt' % i)
+        abstract_path = os.path.join(RESULTS_ABSTRACT_DIR, 'abstract_%d.txt' % i)
+        print '#####################'
+        print i
+        print abstract
 
         with open(article_path, 'w') as f:
             f.write(article)
@@ -322,5 +326,5 @@ if __name__ == '__main__':
     #    sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
     #)
     write_results()
-    #find_articles(sys.argv[1])
+    #find_articles()
     #generate_input_file(sys.argv[1])
