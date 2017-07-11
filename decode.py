@@ -196,8 +196,8 @@ class BeamSearchDecoder(object):
 def print_results(article, abstract, decoded_output, hyp, stop_token):
   """Prints the article, the reference summmary and the decoded summary to screen"""
   print ""
-  tf.logging.info('ARTICLE:  %s', article)
-  tf.logging.info('REFERENCE SUMMARY: %s', abstract)
+  #tf.logging.info('ARTICLE:  %s', article)
+  #tf.logging.info('REFERENCE SUMMARY: %s', abstract)
   tf.logging.info('GENERATED SUMMARY: %s', decoded_output)
   tf.logging.info('LOG_PROB & COV_LOSS: %f, %f', hyp.avg_log_prob(stop_token), hyp.cov_loss)
   print ""

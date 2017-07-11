@@ -23,6 +23,7 @@ import numpy as np
 import tensorflow as tf
 from attention_decoder import attention_decoder
 from tensorflow.contrib.tensorboard.plugins import projector
+from tensorflow.python.client import timeline
 
 from data import N_FREE_TOKENS, START_DECODING
 
@@ -35,6 +36,7 @@ class SummarizationModel(object):
   def __init__(self, hps, vocab):
     self._hps = hps
     self._vocab = vocab
+    self._traces = []
 
   def _add_placeholders(self):
     """Add placeholders to the graph. These are entry points for any input data."""
@@ -307,12 +309,18 @@ class SummarizationModel(object):
 
       # Add the output projection to obtain the vocabulary distribution
       with tf.variable_scope('output_projection'):
-        w = tf.get_variable(
-          'w', [hps.dec_hidden_dim, hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init
-        )
-        v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
-        w_full = tf.matmul(w, embedding, transpose_b=True)
+        if FLAGS.save_matmul:
+          w_full = tf.get_variable(
+            'w_full', [hps.dec_hidden_dim, self._vocab.size()], dtype=tf.float32, initializer=self.trunc_norm_init
+          )
+          self.w_full = w_full
+        else:
+          w = tf.get_variable(
+            'w', [hps.dec_hidden_dim, hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init
+          )
+          w_full = tf.matmul(w, embedding, transpose_b=True)
 
+        v = tf.get_variable('v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init)
         # vocab_scores is the vocabulary distribution before applying softmax. Each entry on
         # the list corresponds to one decoder step
         vocab_scores = []
@@ -563,7 +571,21 @@ class SummarizationModel(object):
       feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
       to_return['coverage'] = self.coverage
 
-    results = sess.run(to_return, feed_dict=feed) # run the decoder step
+    t0 = time.time()
+    # run the decoder step
+    if FLAGS.trace_path:
+      options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+      run_metadata = tf.RunMetadata()
+      results = sess.run(to_return, feed_dict=feed, options=options, run_metadata=run_metadata)
+      sess_time = time.time() - t0
+
+      fetched_timeline = timeline.Timeline(run_metadata.step_stats)
+      chrome_trace = fetched_timeline.generate_chrome_trace_format()
+      self._traces.append(chrome_trace)
+    else:
+      results = sess.run(to_return, feed_dict=feed)
+      sess_time = time.time() - t0
+
 
     # Convert results['states'] (a single LSTMStateTuple) into a list of LSTMStateTuple -- one for each hypothesis
     new_states = [tf.contrib.rnn.LSTMStateTuple(results['states'].c[i, :], results['states'].h[i, :]) for i in xrange(beam_size)]
@@ -588,7 +610,7 @@ class SummarizationModel(object):
     else:
       new_coverage = [None for _ in xrange(beam_size)]
 
-    return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
+    return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage, sess_time
 
 
 def _mask_and_avg(values, padding_mask):

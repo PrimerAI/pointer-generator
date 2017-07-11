@@ -38,7 +38,6 @@ tf.app.flags.DEFINE_string('embeddings_path', '', 'For the start of training, if
 # Important settings
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
 tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a fixed checkpoint, i.e. take the current checkpoint, and use it to produce one summary for each example in the dataset, write the summaries to file and then get ROUGE scores for the whole dataset. If False (default), run concurrent decoding, i.e. repeatedly load latest checkpoint, use it to produce summaries for randomly-chosen examples and log the results to screen, indefinitely.')
-tf.app.flags.DEFINE_boolean('smart_decode', False, 'For decode mode only. If True, avoid repetition in the output using coverage loss and preventing repeated 3-grams.')
 tf.app.flags.DEFINE_boolean('restrictive_embeddings', False, 'If True, then restricts word embeddings to be a linear transform of the pretrained embeddings.')
 
 # Where to save output
@@ -70,6 +69,8 @@ tf.app.flags.DEFINE_float('cov_loss_wt', 1.0, 'Weight of coverage loss (lambda i
 tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-coverage model to a coverage model. Turn this on and run in train mode. Your current model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
 tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
 
+tf.app.flags.DEFINE_boolean('convert_matmul', False, 'Convert to saved matmul model ')
+tf.app.flags.DEFINE_boolean('save_matmul', False, 'Use matmul model.')
 
 def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay):
   """Calculate the running average loss via exponential decay.
@@ -97,6 +98,34 @@ def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay):
   tf.logging.info('running_avg_loss: %f', running_avg_loss)
   return running_avg_loss
 
+
+def convert_matmul_model(model):
+  """Load non-coverage checkpoint, add initialized extra variables for coverage, and save as new checkpoint"""
+  tf.logging.info("converting model to have fixed w_full")
+
+  # initialize an entire coverage model from scratch
+  sess = tf.Session(config=util.get_config())
+  print "initializing everything..."
+  sess.run(tf.global_variables_initializer())
+
+  # load all non-coverage weights from checkpoint
+  saver = tf.train.Saver([
+    v for v in tf.global_variables()
+    if not any(part in v.name for part in ("coverage", "Adagrad", "Adam", "w_full"))
+  ])
+  print "restoring variables..."
+  curr_ckpt = util.load_ckpt(saver, sess)
+  print "restored."
+
+  sess.run({'w_full': model.w_full})
+
+  # save this model and quit
+  new_fname = curr_ckpt + '_wfull_init'
+  print "saving model to %s..." % (new_fname)
+  new_saver = tf.train.Saver() # this one will save all variables that now exist
+  new_saver.save(sess, new_fname)
+  print "saved."
+  exit()
 
 def convert_to_coverage_model():
   """Load non-coverage checkpoint, add initialized extra variables for coverage, and save as new checkpoint"""
@@ -136,6 +165,10 @@ def setup_training(model, batcher):
     if FLAGS.convert_to_coverage_model:
       assert FLAGS.coverage, "To convert your non-coverage model to a coverage model, run with convert_to_coverage_model=True and coverage=True"
       convert_to_coverage_model()
+    if FLAGS.convert_matmul:
+      assert FLAGS.save_matmul
+      convert_matmul_model(model)
+
     saver = tf.train.Saver(max_to_keep=1) # only keep 1 checkpoint at a time
 
   sv = tf.train.Supervisor(logdir=train_dir,

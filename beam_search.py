@@ -16,6 +16,7 @@
 
 """This file contains code to run beam search decoding"""
 
+import os
 import tensorflow as tf
 import numpy as np
 import data
@@ -94,34 +95,22 @@ class Hypothesis(object):
     return .5 * gen_score + .5 * copy_score
     """
 
-  def score(self, stop_token_id, start_sent_ids, stopword_ids, pronoun_ids):
-    if self._has_unknown_token(stop_token_id):
+  def score(self, vocab_size, key_token_ids):
+    if self._has_unknown_token(key_token_ids['stop']):
       return -10 ** 6
 
-    avg_log_prob = self._smart_avg_log_prob(start_sent_ids, stopword_ids, pronoun_ids)
-    return avg_log_prob - self.repeated_n_gram_loss - self.cov_loss
+    avg_log_prob = 1. / len(self.tokens) * sum(
+      lp - .75 * int(token in key_token_ids['pronouns'])
+      for lp, token in zip(self.log_probs, self.tokens)
+    )
+    repeated_entity_loss = self.repeated_entity_loss(vocab_size, key_token_ids['comma'])
+    return avg_log_prob - self.repeated_n_gram_loss - self.cov_loss - repeated_entity_loss
 
-  def _smart_avg_log_prob(self, start_sent_ids, stopword_ids, pronoun_ids):
-    sentence_start_weights = np.zeros((len(self.tokens),), dtype=np.float32)
-    log_probs = np.array(self.log_probs)
-
-    for i, token in enumerate(self.tokens):
-      if token in start_sent_ids:
-        for j in range(i + 1, min(len(self.tokens), i + 5)):
-          if self.tokens[j] not in stopword_ids:
-            sentence_start_weights[j] = 1. / (j - i + 5)
-
-      if token in pronoun_ids:
-        log_probs[i] -= .8
-
-    sentence_start_weights /= sentence_start_weights.sum()
-    sentence_start_log_probs = sentence_start_weights.dot(log_probs)
-
-    return .75 * log_probs.mean() + .25 * sentence_start_log_probs
-
-  @property
-  def avg_top_attn(self):
-      return sum(max(attn_dist) for attn_dist in self.attn_dists) / len(self.attn_dists)
+  def final_score(self, vocab_size, key_token_ids):
+    grammatical_loss = self.grammatical_loss(
+      key_token_ids['left_parens'], key_token_ids['right_parens'], key_token_ids['quote']
+    )
+    return self.score(vocab_size, key_token_ids) - grammatical_loss
 
   @property
   def cov_loss(self):
@@ -147,6 +136,53 @@ class Hypothesis(object):
 
     return 0.
 
+  def repeated_entity_loss(self, vocab_size, comma_id):
+    for i in range(len(self.tokens) - 2):
+      if self.tokens[i] < vocab_size:
+        continue
+      if self.tokens[i] == self.tokens[i + 1]:
+        return 10. ** 6
+      if self.tokens[i] == self.tokens[i + 2] and self.tokens[i + 1] == comma_id:
+        return 10. ** 6
+
+    if self.tokens[-2] >= vocab_size and self.tokens[-2] == self.tokens[-1]:
+      return 10. ** 6
+
+    return 0.
+
+  def grammatical_loss(self, left_parens_id, right_parens_id, quote_id):
+    has_open_left_parens = False
+    quote_count = 0
+
+    for token in self.tokens:
+      if token == left_parens_id:
+        if has_open_left_parens:
+          return 10. ** 6
+        else:
+          has_open_left_parens = True
+      elif token == right_parens_id:
+        if has_open_left_parens:
+          has_open_left_parens = False
+        else:
+          return 10. ** 6
+      elif token == quote_id:
+        quote_count += 1
+
+    return quote_count % 2 == 0
+
+
+def get_key_token_ids(vocab):
+  return {
+    'stop': vocab.word2id(data.STOP_DECODING, None),
+    'comma': vocab.word2id(',', None),
+    'left_parens': vocab.word2id('(', None),
+    'right_parens': vocab.word2id(')', None),
+    'quote': vocab.word2id('"', None),
+    'pronouns': {
+      vocab.word2id(word, None) for word in ('he', 'she', 'him', 'her', 'i', 'we')
+    }
+  }
+
 
 def run_beam_search(sess, model, vocab, batch):
   """Performs beam search decoding on the given example.
@@ -161,7 +197,10 @@ def run_beam_search(sess, model, vocab, batch):
     best_hyp: Hypothesis object; the best hypothesis found by beam search.
   """
   # Run the encoder to get the encoder hidden states and decoder initial state
+  import time
+  t0 = time.time()
   enc_states, dec_in_state = model.run_encoder(sess, batch)
+  print "Encoding time:", time.time() - t0
   # dec_in_state is a LSTMStateTuple
   # enc_states has shape [batch_size, <=max_enc_steps, 2*enc_hidden_dim].
 
@@ -174,16 +213,9 @@ def run_beam_search(sess, model, vocab, batch):
                      coverage=np.zeros([batch.enc_batch.shape[1]]) # zero vector of length attention_length
                      ) for _ in xrange(FLAGS.beam_size)]
   results = [] # this will contain finished hypotheses (those that have emitted the [STOP] token)
+  key_token_ids = get_key_token_ids(vocab)
 
-  stop_token_id = vocab.word2id(data.STOP_DECODING, None)
-  start_sent_ids = {vocab.word2id(word, None) for word in (data.START_DECODING, '.')}
-  stopword_ids = {vocab.word2id(word, None) for word in (
-    'the', 'a', 'an', 'it', 'its', 'this', 'that', 'these', 'those'
-  )}
-  pronoun_ids = {vocab.word2id(word, None) for word in (
-    'he', 'she', 'him', 'her', 'i', 'we'
-  )}
-
+  step_times = []
   steps = 0
   while steps < FLAGS.max_dec_steps and len(results) < 4 * FLAGS.beam_size:
     latest_tokens = [h.latest_token for h in hyps] # latest token produced by each hypothesis
@@ -192,8 +224,9 @@ def run_beam_search(sess, model, vocab, batch):
     states = [h.state for h in hyps] # list of current decoder states of the hypotheses
     prev_coverage = [h.coverage for h in hyps] # list of coverage vectors (or None)
 
+    t0 = time.time()
     # Run one step of the decoder to get the new info
-    topk_ids, topk_log_probs, new_states, attn_dists, p_gens, new_coverage = model.decode_onestep(
+    topk_ids, topk_log_probs, new_states, attn_dists, p_gens, new_coverage, sess_time = model.decode_onestep(
       sess=sess,
       batch=batch,
       latest_tokens=latest_tokens,
@@ -201,6 +234,7 @@ def run_beam_search(sess, model, vocab, batch):
       dec_init_states=states,
       prev_coverage=prev_coverage,
     )
+    step_times.append((time.time() - t0, sess_time))
 
     # Extend each hypothesis and collect them all in all_hyps
     all_hyps = []
@@ -219,7 +253,7 @@ def run_beam_search(sess, model, vocab, batch):
 
     # Filter and collect any hypotheses that have produced the end token.
     hyps = [] # will contain hypotheses for the next step
-    for h in sort_hyps(all_hyps, stop_token_id, start_sent_ids, stopword_ids, pronoun_ids): # in order of most likely h
+    for h in sort_hyps(all_hyps, vocab.size, key_token_ids, complete_hyps=False): # in order of most likely h
       if h.latest_token == vocab.word2id(data.STOP_DECODING, None): # if stop token is reached...
         # If this hypothesis is sufficiently long, put in results. Otherwise discard.
         if steps >= FLAGS.min_dec_steps:
@@ -233,22 +267,30 @@ def run_beam_search(sess, model, vocab, batch):
 
     steps += 1
 
+  print "Avg step time:", sum(st[0] for st in step_times) / steps
+  print "Avg sess time:", sum(st[1] for st in step_times) / steps
+
+  if FLAGS.trace_path:
+    for i, trace in enumerate(model._traces):
+      with open(os.path.join(FLAGS.trace_path, 'timeline_%d.json' % i), 'w') as f:
+        f.write(trace)
+
   # At this point, either we've got 4 * beam_size results, or we've reached maximum decoder steps
 
   if len(results)==0: # if we don't have any complete results, add all current hypotheses (incomplete summaries) to results
     results = hyps
 
   # Sort hypotheses by average log probability
-  hyps_sorted = sort_hyps(results, stop_token_id, start_sent_ids, stopword_ids, pronoun_ids)
+  hyps_sorted = sort_hyps(results, vocab.size, key_token_ids, complete_hyps=True)
 
   # Return the hypothesis with highest average log prob
   return hyps_sorted[0]
 
-def sort_hyps(hyps, stop_token_id, start_sent_ids, stopword_ids, pronoun_ids):
+def sort_hyps(hyps, vocab_size, key_token_ids, complete_hyps):
   """Return a list of Hypothesis objects, sorted by descending average log probability"""
-  if FLAGS.smart_decode:
-    score_func = lambda h: h.score(stop_token_id, start_sent_ids, stopword_ids, pronoun_ids)
+  if complete_hyps:
+    score_func = lambda h: h.final_score(vocab_size, key_token_ids)
   else:
-    score_func = lambda h: h.avg_log_prob(stop_token_id)
+    score_func = lambda h: h.score(vocab_size, key_token_ids)
 
   return sorted(hyps, key=score_func, reverse=True)

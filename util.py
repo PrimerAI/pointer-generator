@@ -18,7 +18,6 @@
 
 import tensorflow as tf
 import time
-import traceback
 import os
 
 FLAGS = tf.app.flags.FLAGS
