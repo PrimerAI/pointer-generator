@@ -77,12 +77,15 @@ class BeamSearchDecoder(object):
   def decode(self):
     """Decode examples until data is exhausted (if FLAGS.single_pass) and return, or decode indefinitely, loading latest checkpoint at regular intervals"""
     counter = 0
+    scores = []
+
     while True:
       batch = self._batcher.next_batch()  # 1 example repeated across batch
       if batch is None: # finished decoding dataset in single_pass mode
         assert FLAGS.single_pass, "Dataset exhausted, but we are not in single_pass mode"
         tf.logging.info("Decoder has finished reading dataset for single_pass.")
         tf.logging.info("Output has been saved in %s and %s. Now starting ROUGE eval...", self._rouge_ref_dir, self._rouge_dec_dir)
+        tf.logging.info("Mean score: %s", sum(scores) / len(scores))
         results_dict = rouge_eval(self._rouge_ref_dir, self._rouge_dec_dir)
         rouge_log(results_dict, self._decode_dir)
         return
@@ -95,8 +98,10 @@ class BeamSearchDecoder(object):
 
       # Run beam search to get best Hypothesis
       t_beam = time.time()
-      best_hyp = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+      best_hyp, best_score = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+      scores.append(best_score)
       tf.logging.info("Time to decode one example: %f", time.time() - t_beam)
+      tf.logging.info("Mean score: %s", sum(scores) / len(scores))
 
       # Extract the output ids from the hypothesis and convert back to words
       output_ids = [int(t) for t in best_hyp.tokens[1:]]

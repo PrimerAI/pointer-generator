@@ -43,6 +43,7 @@ tf.app.flags.DEFINE_boolean('restrictive_embeddings', False, 'If True, then rest
 # Where to save output
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name for experiment. Logs will be saved in a directory with this name, under log_root.')
+tf.app.flags.DEFINE_string('trace_path', '', 'Directory for writing decode traces to.')
 
 # Hyperparameters
 tf.app.flags.DEFINE_integer('enc_hidden_dim', 256, 'dimension of RNN hidden states')
