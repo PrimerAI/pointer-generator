@@ -133,7 +133,7 @@ def process_article_abstract(story_name, article, abstract):
   spacy_text = get_spacy()(full_article)
   assert len(full_article) == len(spacy_text.text)
 
-  span_to_person_id, people_resolver = resolve_people(spacy_text, full_article)
+  span_to_person_id = resolve_people(spacy_text, full_article)
   article_tokens = []
   abstract_tokens = []
 
@@ -191,7 +191,7 @@ def resolve_people(spacy_text, text):
   )
   span_to_person_id = {span: i for i, spans in enumerate(spans_by_person) for span in spans}
 
-  return span_to_person_id, people_resolver
+  return span_to_person_id
 
 
 def find_person_span_and_update(text, span_to_person_id, start, end):

@@ -100,11 +100,11 @@ class Hypothesis(object):
       return -(10. ** 6)
 
     token_scores = []
-    for token, log_prob in zip(self.tokens, self.log_probs):
+    for i, (token, log_prob) in enumerate(zip(self.tokens, self.log_probs)):
       log_prob -= float(token in key_token_ids['pronouns'])
       dec_token = article_id_to_word_id.get(token, token)
-      log_prob += 2 * float(dec_token in key_token_ids['people'])
-      log_prob += float(dec_token in key_token_ids['other_entities'])
+      log_prob += 10. / (i + 4.) * float(dec_token in key_token_ids['people'])
+      log_prob += 5. / (i + 4) * float(dec_token in key_token_ids['other_entities'])
       token_scores.append(log_prob)
 
     self._scores[is_complete] = sum(token_scores) / len(token_scores) - self.cov_loss
@@ -129,9 +129,11 @@ def get_key_token_ids(vocab):
     'stop': vocab.word2id(data.STOP_DECODING, None),
     'comma': vocab.word2id(',', None),
     'pronouns': {vocab.word2id(word, None) for word in ('he', 'she', 'him', 'her')},
-    'people': {vocab.word2id(word, None) for word in data.PERSON_TOKENS},
+    'people': {vocab.word2id(word, None) for word in data.PERSON_TOKENS + ('[ORG]',)},
     'other_entities': {
-      vocab.word2id(word, None) for word in data.ENTITY_TOKENS if word not in data.PERSON_TOKENS
+      vocab.word2id(word, None)
+      for word in data.ENTITY_TOKENS + ('[PROPN]',)
+      if word not in data.PERSON_TOKENS and word != '[ORG]'
     },
   }
 

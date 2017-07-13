@@ -8,9 +8,11 @@ from sklearn.decomposition.truncated_svd import TruncatedSVD
 from tensorflow.core.example import example_pb2
 
 from data import N_FREE_TOKENS, Vocab
+from generate import generate_summary
 from make_datafiles import get_art_abs, process_article_abstract
 from pygov.analytic_pipeline.common.nlp.tokenizers import NewsSentenceTokenizer
 from pygov.analytic_pipeline.common.summary import build_summaries
+from pygov.analytic_pipeline.document_pipeline import SingleDocument
 
 
 ######################################################
@@ -189,10 +191,10 @@ RESULTS_ABSTRACT_DIR = os.path.join(RESULTS_DIR, 'abstract')
 SUMMARY_OUTPUT_LOCATIONS = (
     ('Reference', RESULTS_ABSTRACT_DIR, 'abstract_%d.txt'),
     #('Normal', os.path.join(RESULTS_DIR, 'decoded_normal'), '%06d_decoded.txt'),
-    ('Coverage', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
+    #('Coverage', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
     #('Coverage v4', os.path.join(RESULTS_DIR, 'decoded_coverage_4'), '%06d_decoded.txt'),
-    ('Restrictive', os.path.join(RESULTS_DIR, 'decoded_restr'), '%06d_decoded.txt'),
-    ('Corrective', os.path.join(RESULTS_DIR, 'decoded_corrective'), '%06d_decoded.txt'),
+    #('Restrictive', os.path.join(RESULTS_DIR, 'decoded_restr'), '%06d_decoded.txt'),
+    #('Corrective', os.path.join(RESULTS_DIR, 'decoded_corrective'), '%06d_decoded.txt'),
     #('Abisee', os.path.join(abisee_result_dir, 'pointer-gen-cov'), '%s_decoded.txt'),
 )
 
@@ -276,6 +278,8 @@ def write_results():
         # Read article
         with open(os.path.join(RESULTS_ARTICLE_DIR, filename)) as f:
             article_text = unicode(f.read(), 'utf-8').replace(u'\xa0', ' ')
+        doc = SingleDocument(0, raw={'body': article_text})
+        clean_article = doc.clean_text_and_raw_spans()[0]
 
         # Read pregenerated seq-to-seq summaries
         summaries = []
@@ -284,12 +288,16 @@ def write_results():
                 summaries.append(f.read())
 
         # Generate lexrank summary on the fly
-        summaries.append(get_lexrank_summary(article_text).encode('utf-8'))
+        summaries.append(get_lexrank_summary(clean_article).encode('utf-8'))
+
+        # Generate seq-to-seq summary on the fly!
+
+        summaries.append(generate_summary(clean_article))
 
         # Print all results together
         print '\t'.join([
             string.replace('\t', ' ').replace('\n', ' ')
-            for string in [article_text.encode('utf-8')] + summaries
+            for string in [clean_article[:500].encode('utf-8')] + summaries
         ])
 
 ######################################################
