@@ -8,7 +8,7 @@ from collections import defaultdict
 from tensorflow.core.example import example_pb2
 
 from data import ENTITY_TOKENS, POS_TOKENS
-from primer_core.entities.people import SpacyPeopleResolver
+from primer_core.entities.people.people_resolver import SpacyPeopleResolver
 from primer_core.nlp.get_spacy import get_spacy
 from pygov.analytic_pipeline.document_pipeline import SingleDocument
 

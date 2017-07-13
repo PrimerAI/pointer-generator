@@ -17,11 +17,12 @@
 """This file contains code to process data into batches"""
 
 import Queue
-from random import shuffle
-from threading import Thread
-import time
 import numpy as np
 import tensorflow as tf
+import time
+from random import shuffle
+from threading import Thread
+
 import data
 
 
@@ -63,20 +64,19 @@ class Example(object):
     )
     self.dec_len = len(self.dec_input)
 
-    # If using pointer-generator mode, we need to store some extra info
-    if hps.pointer_gen:
-      # Store a version of the enc_input where in-article OOVs are represented by their temporary OOV id; also store the in-article OOVs words themselves
-      self.enc_input_extend_vocab, self.article_oovs, self.article_id_to_word_id = (
-        data.article2ids(article_words, vocab)
-      )
+    # Store a version of the enc_input where in-article OOVs are represented by their temporary OOV id; also store the in-article OOVs words themselves
+    (
+      self.enc_input_extend_vocab, self.article_oovs, self.article_id_to_word_id,
+      self.article_id_to_word_index
+    ) = data.article2ids(article_words, vocab)
 
-      # Get a verison of the reference summary where in-article OOVs are represented by their temporary article OOV id
-      abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
+    # Get a verison of the reference summary where in-article OOVs are represented by their temporary article OOV id
+    abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
 
-      # Overwrite decoder target sequence so it uses the temp article OOV ids
-      _, self.target = self.get_dec_inp_targ_seqs(
-        abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding
-      )
+    # Overwrite decoder target sequence so it uses the temp article OOV ids
+    _, self.target = self.get_dec_inp_targ_seqs(
+      abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding
+    )
 
     # Store the original strings
     self.original_article = article
@@ -125,9 +125,8 @@ class Example(object):
     while len(self.enc_input) < max_len:
       self.enc_input.append(pad_id)
 
-    if self.hps.pointer_gen:
-      while len(self.enc_input_extend_vocab) < max_len:
-        self.enc_input_extend_vocab.append(pad_id)
+    while len(self.enc_input_extend_vocab) < max_len:
+      self.enc_input_extend_vocab.append(pad_id)
 
 
 class Batch(object):
@@ -146,14 +145,13 @@ class Batch(object):
     self.init_decoder_seq(example_list, hps) # initialize the input and targets for the decoder
     self.store_orig_strings(example_list) # store the original strings
 
+
   def init_encoder_seq(self, example_list, hps):
     """Initializes the following:
         self.enc_batch:
           numpy array of shape (batch_size, <=max_enc_steps) containing integer ids (all OOVs represented by UNK id), padded to length of longest sequence in the batch
         self.enc_lens:
           numpy array of shape (batch_size) containing integers. The (truncated) length of each encoder input sequence (pre-padding).
-
-      If hps.pointer_gen, additionally initializes the following:
         self.max_art_oovs:
           maximum number of in-article OOVs in the batch
         self.art_oovs:
@@ -178,18 +176,17 @@ class Batch(object):
       self.enc_batch[i, :] = ex.enc_input[:]
       self.enc_lens[i] = ex.enc_len
 
-    # For pointer-generator mode, need to store some extra info
-    if hps.pointer_gen:
-      # Determine the max number of in-article OOVs in this batch
-      self.max_art_oovs = max([len(ex.article_oovs) for ex in example_list])
-      # Store the in-article OOVs themselves
-      self.art_oovs = [ex.article_oovs for ex in example_list]
-      # Store the version of the enc_batch that uses the article OOV ids
-      self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
-      for i, ex in enumerate(example_list):
-        self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
+    # Determine the max number of in-article OOVs in this batch
+    self.max_art_oovs = max([len(ex.article_oovs) for ex in example_list])
+    # Store the in-article OOVs themselves
+    self.art_oovs = [ex.article_oovs for ex in example_list]
+    # Store the version of the enc_batch that uses the article OOV ids
+    self.enc_batch_extend_vocab = np.zeros((hps.batch_size, max_enc_seq_len), dtype=np.int32)
+    for i, ex in enumerate(example_list):
+      self.enc_batch_extend_vocab[i, :] = ex.enc_input_extend_vocab[:]
 
-      self.article_id_to_word_ids = [example.article_id_to_word_id for example in example_list]
+    self.article_id_to_word_ids = [example.article_id_to_word_id for example in example_list]
+
 
   def init_decoder_seq(self, example_list, hps):
     """Initializes the following:
@@ -217,10 +214,12 @@ class Batch(object):
       for j in xrange(ex.dec_len):
         self.padding_mask[i][j] = 1
 
+
   def store_orig_strings(self, example_list):
     """Store the original article and abstract strings in the Batch object"""
     self.original_articles = [ex.original_article for ex in example_list] # list of lists
     self.original_abstracts = [ex.original_abstract for ex in example_list] # list of lists
+
 
 class Batcher(object):
   """A class to generate minibatches of data. Buckets examples together based on length of the encoder sequence."""
@@ -292,6 +291,7 @@ class Batcher(object):
 
     batch = self._batch_queue.get() # get the next Batch
     return batch
+
 
   def fill_example_queue(self):
     """Reads data from file and processes into Examples which are then placed into the example queue."""

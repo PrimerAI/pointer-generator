@@ -16,27 +16,55 @@
 
 """This file contains code to build and run the tensorflow graph for the sequence-to-sequence model"""
 
+import numpy as np
 import os
 import sys
-import time
-import numpy as np
 import tensorflow as tf
-from attention_decoder import attention_decoder
+import time
+from collections import namedtuple
 from tensorflow.contrib.tensorboard.plugins import projector
 from tensorflow.python.client import timeline
 
+from attention_decoder import attention_decoder
 from data import N_FREE_TOKENS, START_DECODING
 
-FLAGS = tf.app.flags.FLAGS
+
+Settings = namedtuple('Settings', (
+  'embeddings_path',
+  'log_root',
+  'trace_path',
+))
+
+Hps = namedtuple('Hyperparameters', (
+  'adagrad_init_acc',
+  'adam_optimizer',
+  'batch_size',
+  'cov_loss_wt',
+  'coverage',
+  'dec_hidden_dim',
+  'emb_dim',
+  'enc_hidden_dim',
+  'lr',
+  'max_dec_steps',
+  'max_enc_steps',
+  'max_grad_norm',
+  'mode',
+  'rand_unif_init_mag',
+  'restrictive_embeddings',
+  'save_matmul',
+  'trunc_norm_init_std',
+))
 
 
 class SummarizationModel(object):
   """A class to represent a sequence-to-sequence model for text summarization. Supports both baseline mode, pointer-generator mode, and coverage"""
 
-  def __init__(self, hps, vocab):
+  def __init__(self, settings, hps, vocab):
+    self._settings = settings
     self._hps = hps
     self._vocab = vocab
     self._traces = []
+
 
   def _add_placeholders(self):
     """Add placeholders to the graph. These are entry points for any input data."""
@@ -45,16 +73,15 @@ class SummarizationModel(object):
     # encoder part
     self._enc_batch = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch')
     self._enc_lens = tf.placeholder(tf.int32, [hps.batch_size], name='enc_lens')
-    if FLAGS.pointer_gen:
-      self._enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
-      self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
+    self._enc_batch_extend_vocab = tf.placeholder(tf.int32, [hps.batch_size, None], name='enc_batch_extend_vocab')
+    self._max_art_oovs = tf.placeholder(tf.int32, [], name='max_art_oovs')
 
     # decoder part
     self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
     self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
     self._padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='padding_mask')
 
-    if hps.mode=="decode" and hps.coverage:
+    if hps.mode == "decode" and hps.coverage:
       self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
 
 
@@ -69,13 +96,12 @@ class SummarizationModel(object):
     if dec_batch is None:
       dec_batch = batch.dec_batch
 
-    feed_dict = {}
-    feed_dict[self._enc_batch] = batch.enc_batch
-    feed_dict[self._enc_lens] = batch.enc_lens
-
-    if FLAGS.pointer_gen:
-      feed_dict[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-      feed_dict[self._max_art_oovs] = batch.max_art_oovs
+    feed_dict = {
+      self._enc_batch: batch.enc_batch,
+      self._enc_lens: batch.enc_lens,
+      self._enc_batch_extend_vocab: batch.enc_batch_extend_vocab,
+      self._max_art_oovs: batch.max_art_oovs,
+    }
 
     if not just_enc:
       feed_dict[self._dec_batch] = dec_batch
@@ -83,6 +109,7 @@ class SummarizationModel(object):
       feed_dict[self._padding_mask] = batch.padding_mask
 
     return feed_dict
+
 
   def _add_encoder(self, encoder_inputs, seq_len):
     """Add a single-layer bidirectional LSTM encoder to the graph.
@@ -160,12 +187,12 @@ class SummarizationModel(object):
     outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
       inputs, self._dec_in_state, self._enc_states, cell,
       initial_state_attention=(hps.mode=="decode"),
-      pointer_gen=hps.pointer_gen,
       use_coverage=hps.coverage,
       prev_coverage=prev_coverage,
     )
 
     return outputs, out_state, attn_dists, p_gens, coverage
+
 
   def _calc_final_dist(self, vocab_dists, attn_dists):
     """Calculate the final distribution, for the pointer-generator model
@@ -180,10 +207,10 @@ class SummarizationModel(object):
     with tf.variable_scope('final_distribution'):
       # Multiply vocab dists by p_gen and attention dists by (1-p_gen)
       vocab_dists = [p_gen * dist for (p_gen,dist) in zip(self.p_gens, vocab_dists)]
-      attn_dists = [(1-p_gen) * dist for (p_gen,dist) in zip(self.p_gens, attn_dists)]
+      attn_dists = [(1 - p_gen) * dist for (p_gen,dist) in zip(self.p_gens, attn_dists)]
 
       # Concatenate some zeros to each vocabulary dist, to hold the probabilities for in-article OOV words
-      extended_vsize = self._vocab.size() + self._max_art_oovs # the maximum (over the batch) size of the extended vocabulary
+      extended_vsize = self._vocab.size + self._max_art_oovs # the maximum (over the batch) size of the extended vocabulary
       extra_zeros = tf.zeros((self._hps.batch_size, self._max_art_oovs))
       vocab_dists_extended = [tf.concat(axis=1, values=[dist, extra_zeros]) for dist in vocab_dists] # list length max_dec_steps of shape (batch_size, extended_vsize)
 
@@ -202,7 +229,7 @@ class SummarizationModel(object):
       # Add the vocab distributions and the copy distributions together to get the final distributions
       # final_dists is a list length max_dec_steps; each entry is a tensor shape (batch_size, extended_vsize) giving the final distribution for that decoder timestep
       # Note that for decoder timesteps and examples corresponding to a [PAD] token, this is junk - ignore.
-      final_dists = [vocab_dist + copy_dist for (vocab_dist,copy_dist) in zip(vocab_dists_extended, attn_dists_projected)]
+      final_dists = [vocab_dist + copy_dist for (vocab_dist, copy_dist) in zip(vocab_dists_extended, attn_dists_projected)]
 
       # OOV part of vocab is max_art_oov long. Not all the sequences in a batch will have max_art_oov tokens.
       # That will cause some entries to be 0 in the distribution, which will result in NaN when calulating log_dists
@@ -215,11 +242,12 @@ class SummarizationModel(object):
 
       return final_dists
 
+
   def _add_emb_vis(self, embedding_var):
     """Do setup so that we can view word embedding visualization in Tensorboard, as described here:
     https://www.tensorflow.org/get_started/embedding_viz
     Make the vocab metadata file, then make the projector config file pointing to it."""
-    train_dir = os.path.join(FLAGS.log_root, "train")
+    train_dir = os.path.join(self._settings.log_root, "train")
     vocab_metadata_path = os.path.join(train_dir, "vocab_metadata.tsv")
     self._vocab.write_metadata(vocab_metadata_path) # write metadata file
     summary_writer = tf.summary.FileWriter(train_dir)
@@ -229,10 +257,59 @@ class SummarizationModel(object):
     embedding.metadata_path = vocab_metadata_path
     projector.visualize_embeddings(summary_writer, config)
 
+
+  def _add_embeddings(self):
+    hps = self._hps
+    vsize = self._vocab.size # size of the vocabulary
+    embeddings_path = self._settings.embeddings_path
+
+    if embeddings_path:
+      tf.logging.info('Using pretrained embeddings')
+      embedding_value = np.load(embeddings_path)
+
+      if hps.restrictive_embeddings:
+        assert embedding_value.shape[0] == vsize
+        embedding_transform = tf.get_variable(
+          'embedding_transform',
+          shape=[embedding_value.shape[1], hps.emb_dim],
+          dtype=tf.float32,
+          initializer=self.trunc_norm_init,
+        )
+        known_token_embeddings = tf.matmul(embedding_value, embedding_transform)
+        unknown_token_embeddings = tf.get_variable(
+          'unknown_token_embeddings',
+          shape=[N_FREE_TOKENS, hps.emb_dim],
+          dtype=tf.float32,
+          initializer=self.trunc_norm_init,
+        )
+        unknown_token_embeddings_full = tf.pad(
+          unknown_token_embeddings, [[0, vsize - N_FREE_TOKENS], [0, 0]]
+        )
+        embedding = known_token_embeddings + unknown_token_embeddings_full
+
+      else:
+        assert embedding_value.shape == (vsize, hps.emb_dim)
+        embedding = tf.Variable(
+          name='embedding',
+          initial_value=embedding_value,
+          dtype=tf.float32,
+        )
+
+    else:
+      embedding = tf.get_variable(
+        'embedding',
+        shape=[vsize, hps.emb_dim],
+        dtype=tf.float32,
+        initializer=self.trunc_norm_init,
+      )
+
+    return embedding
+
+
   def _add_seq2seq(self):
     """Add the whole sequence-to-sequence model to the graph."""
     hps = self._hps
-    vsize = self._vocab.size() # size of the vocabulary
+    vsize = self._vocab.size # size of the vocabulary
 
     with tf.variable_scope('seq2seq'):
       # Some initializers
@@ -243,45 +320,9 @@ class SummarizationModel(object):
 
       # Add embedding matrix (shared by the encoder and decoder inputs)
       with tf.variable_scope('embedding'):
-        if FLAGS.embeddings_path:
-          tf.logging.info('Using pretrained embeddings')
-          embedding_value = np.load(FLAGS.embeddings_path)
+        embedding = self._add_embeddings()
 
-          if hps.restrictive_embeddings:
-            assert embedding_value.shape[0] == vsize
-            embedding_transform = tf.get_variable(
-              'embedding_transform',
-              shape=[embedding_value.shape[1], hps.emb_dim],
-              dtype=tf.float32,
-              initializer=self.trunc_norm_init,
-            )
-            known_token_embeddings = tf.matmul(embedding_value, embedding_transform)
-            unknown_token_embeddings = tf.get_variable(
-              'unknown_token_embeddings',
-              shape=[N_FREE_TOKENS, hps.emb_dim],
-              dtype=tf.float32,
-              initializer=self.trunc_norm_init,
-            )
-            unknown_token_embeddings_full = tf.pad(
-              unknown_token_embeddings, [[0, vsize - N_FREE_TOKENS], [0, 0]]
-            )
-            embedding = known_token_embeddings + unknown_token_embeddings_full
-          else:
-            assert embedding_value.shape == (vsize, hps.emb_dim)
-            embedding = tf.Variable(
-              name='embedding',
-              initial_value=embedding_value,
-              dtype=tf.float32,
-            )
-
-        else:
-          embedding = tf.get_variable(
-            'embedding',
-            shape=[vsize, hps.emb_dim],
-            dtype=tf.float32,
-            initializer=self.trunc_norm_init,
-          )
-        if hps.mode=="train":
+        if hps.mode == "train":
           self._add_emb_vis(embedding) # add to tensorboard
 
         # tensor with shape (batch_size, max_enc_steps, emb_size)
@@ -309,11 +350,11 @@ class SummarizationModel(object):
 
       # Add the output projection to obtain the vocabulary distribution
       with tf.variable_scope('output_projection'):
-        if FLAGS.save_matmul:
+        if self._hps.save_matmul:
           w_full = tf.get_variable(
-            'w_full', [hps.dec_hidden_dim, self._vocab.size()], dtype=tf.float32, initializer=self.trunc_norm_init
+            'w_full', [hps.dec_hidden_dim, self._vocab.size], dtype=tf.float32,
+            initializer=self.trunc_norm_init
           )
-          self.w_full = w_full
         else:
           w = tf.get_variable(
             'w', [hps.dec_hidden_dim, hps.emb_dim], dtype=tf.float32, initializer=self.trunc_norm_init
@@ -333,35 +374,26 @@ class SummarizationModel(object):
         vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
 
 
-      # For pointer-generator model, calc final distribution from copy distribution and vocabulary distribution, then take log
-      if FLAGS.pointer_gen:
-        final_dists = self._calc_final_dist(vocab_dists, self.attn_dists)
-        # Take log of final distribution
-        log_dists = [tf.log(dist) for dist in final_dists]
-      else: # just take log of vocab_dists
-        log_dists = [tf.log(dist) for dist in vocab_dists]
-
+      # Calc final distribution from copy distribution and vocabulary distribution, then take log
+      final_dists = self._calc_final_dist(vocab_dists, self.attn_dists)
+      # Take log of final distribution
+      log_dists = [tf.log(dist) for dist in final_dists]
 
       if hps.mode in ['train', 'eval']:
         # Calculate the loss
         with tf.variable_scope('loss'):
-          if FLAGS.pointer_gen: # calculate loss from log_dists
-            # Calculate the loss per step
-            # This is fiddly; we use tf.gather_nd to pick out the log probabilities of the target words
-            loss_per_step = [] # will be list length max_dec_steps containing shape (batch_size)
-            batch_nums = tf.range(0, limit=hps.batch_size) # shape (batch_size)
-            for dec_step, log_dist in enumerate(log_dists):
-              targets = self._target_batch[:,dec_step] # The indices of the target words. shape (batch_size)
-              indices = tf.stack((batch_nums, targets), axis=1) # shape (batch_size, 2)
-              losses = tf.gather_nd(-log_dist, indices) # shape (batch_size). loss on this step for each batch
-              loss_per_step.append(losses)
+          # Calculate the loss per step
+          # This is fiddly; we use tf.gather_nd to pick out the log probabilities of the target words
+          loss_per_step = [] # will be list length max_dec_steps containing shape (batch_size)
+          batch_nums = tf.range(0, limit=hps.batch_size) # shape (batch_size)
+          for dec_step, log_dist in enumerate(log_dists):
+            targets = self._target_batch[:,dec_step] # The indices of the target words. shape (batch_size)
+            indices = tf.stack((batch_nums, targets), axis=1) # shape (batch_size, 2)
+            losses = tf.gather_nd(-log_dist, indices) # shape (batch_size). loss on this step for each batch
+            loss_per_step.append(losses)
 
-            # Apply padding_mask mask and get loss
-            self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
-
-          else: # baseline model
-            self._loss = tf.contrib.seq2seq.sequence_loss(tf.stack(vocab_scores, axis=1), self._target_batch, self._padding_mask) # this applies softmax internally
-
+          # Apply padding_mask mask and get loss
+          self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
           tf.summary.scalar('loss', self._loss)
 
           # Calculate coverage loss from the attention distributions
@@ -374,7 +406,7 @@ class SummarizationModel(object):
 
     if hps.mode == "decode":
       # We run decode beam search mode one decoder step at a time
-      assert len(log_dists)==1 # log_dists is a singleton list containing shape (batch_size, extended_vsize)
+      assert len(log_dists) == 1 # log_dists is a singleton list containing shape (batch_size, extended_vsize)
       log_dists = log_dists[0]
       self._topk_log_probs, self._topk_ids = tf.nn.top_k(log_dists, hps.batch_size*2) # note batch_size=beam_size in decode mode
     else:
@@ -422,6 +454,7 @@ class SummarizationModel(object):
     t1 = time.time()
     tf.logging.info('Time to build graph: %i seconds', t1 - t0)
 
+
   def run_train_step(self, sess, batch, use_generated_inputs):
     """Runs one training iteration. Returns a dictionary containing train op, summaries, loss, global_step and (optionally) coverage loss."""
     feed_dict, to_return = self._get_train_step_feed_return(
@@ -442,10 +475,11 @@ class SummarizationModel(object):
 
     tf.logging.info('seconds for training step with generated input: %.3f', time.time() - t0)
     tf.logging.info('generated-input loss: %f', results_generated['loss'])
-    if FLAGS.coverage:
+    if self._hps.coverage:
       tf.logging.info("generated-input coverage_loss: %f", results_generated['coverage_loss'])
 
     return results
+
 
   def _get_output_info(self, batch, results):
     probs = np.exp(results['top_k_log_probs'])
@@ -496,6 +530,7 @@ class SummarizationModel(object):
     if self._hps.coverage:
       to_return['coverage_loss'] = self._coverage_loss
     return sess.run(to_return, feed_dict)
+
 
   def run_encoder(self, sess, batch):
     """For beam search decoding. Run the encoder on the batch and return the encoder states and decoder initial state.
@@ -553,6 +588,8 @@ class SummarizationModel(object):
         self._enc_states: enc_states,
         self._dec_in_state: new_dec_in_state,
         self._dec_batch: np.transpose(np.array([latest_tokens])),
+        self._enc_batch_extend_vocab: batch.enc_batch_extend_vocab,
+        self._max_art_oovs: batch.max_art_oovs,
     }
 
     to_return = {
@@ -560,32 +597,24 @@ class SummarizationModel(object):
       "probs": self._topk_log_probs,
       "states": self._dec_out_state,
       "attn_dists": self.attn_dists,
+      "p_gens": self.p_gens,
     }
-
-    if FLAGS.pointer_gen:
-      feed[self._enc_batch_extend_vocab] = batch.enc_batch_extend_vocab
-      feed[self._max_art_oovs] = batch.max_art_oovs
-      to_return['p_gens'] = self.p_gens
 
     if self._hps.coverage:
       feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
       to_return['coverage'] = self.coverage
 
-    t0 = time.time()
     # run the decoder step
-    if FLAGS.trace_path:
+    if self._settings.trace_path:
       options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
       run_metadata = tf.RunMetadata()
       results = sess.run(to_return, feed_dict=feed, options=options, run_metadata=run_metadata)
-      sess_time = time.time() - t0
 
       fetched_timeline = timeline.Timeline(run_metadata.step_stats)
       chrome_trace = fetched_timeline.generate_chrome_trace_format()
       self._traces.append(chrome_trace)
     else:
       results = sess.run(to_return, feed_dict=feed)
-      sess_time = time.time() - t0
-
 
     # Convert results['states'] (a single LSTMStateTuple) into a list of LSTMStateTuple -- one for each hypothesis
     new_states = [tf.contrib.rnn.LSTMStateTuple(results['states'].c[i, :], results['states'].h[i, :]) for i in xrange(beam_size)]
@@ -594,23 +623,20 @@ class SummarizationModel(object):
     assert len(results['attn_dists'])==1
     attn_dists = results['attn_dists'][0].tolist()
 
-    if FLAGS.pointer_gen:
-      # Convert singleton list containing a tensor to a list of k arrays
-      assert len(results['p_gens'])==1
-      p_gens = results['p_gens'][0].tolist()
-      assert all(len(gen_list) == 1 for gen_list in p_gens)
-      p_gens = [gen_list[0] for gen_list in p_gens]
-    else:
-      p_gens = [None for _ in xrange(beam_size)]
+    # Convert singleton list containing a tensor to a list of k arrays
+    assert len(results['p_gens']) == 1
+    p_gens = results['p_gens'][0].tolist()
+    assert all(len(gen_list) == 1 for gen_list in p_gens)
+    p_gens = [gen_list[0] for gen_list in p_gens]
 
     # Convert the coverage tensor to a list length k containing the coverage vector for each hypothesis
-    if FLAGS.coverage:
+    if self._hps.coverage:
       new_coverage = results['coverage'].tolist()
       assert len(new_coverage) == beam_size
     else:
       new_coverage = [None for _ in xrange(beam_size)]
 
-    return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage, sess_time
+    return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
 
 
 def _mask_and_avg(values, padding_mask):

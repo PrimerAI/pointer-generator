@@ -16,15 +16,13 @@
 
 """This is the top-level file to train, evaluate or test your summarization model"""
 
-import sys
 import time
 import os
 import tensorflow as tf
 import numpy as np
-from collections import namedtuple
 from data import Vocab
 from batcher import Batcher
-from model import SummarizationModel
+from model import Hps, Settings, SummarizationModel
 from decode import BeamSearchDecoder
 import util
 
@@ -59,9 +57,6 @@ tf.app.flags.DEFINE_float('adagrad_init_acc', 0.1, 'initial accumulator value fo
 tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells random uniform inititalization')
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('max_grad_norm', 2.0, 'for gradient clipping')
-
-# Pointer-generator or baseline model
-tf.app.flags.DEFINE_boolean('pointer_gen', True, 'If True, use pointer-generator model. If False, use baseline model.')
 
 # Training hyperparameters
 tf.app.flags.DEFINE_boolean('adam_optimizer', False, 'Use Adam optimizer instead of Adagrad.')
@@ -100,9 +95,27 @@ def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay):
   return running_avg_loss
 
 
-def convert_matmul_model(model):
+def convert_matmul_model(hps, vocab_size):
   """Load non-coverage checkpoint, add initialized extra variables for coverage, and save as new checkpoint"""
   tf.logging.info("converting model to have fixed w_full")
+
+  with tf.variable_scope('seq2seq'):
+    with tf.variable_scope('embedding'):
+      tf.get_variable_scope().reuse_variables()
+      embedding = tf.get_variable(
+        'embedding',
+        shape=[vocab_size, hps.emb_dim],
+        dtype=tf.float32,
+      )
+    with tf.variable_scope('output_projection'):
+      w = tf.get_variable(
+        'w', [hps.dec_hidden_dim, hps.emb_dim], dtype=tf.float32
+      )
+
+      tf.get_variable_scope().reuse_variables()
+      w_full = tf.get_variable(
+        'w_full', [hps.dec_hidden_dim, vocab_size], dtype=tf.float32,
+      )
 
   # initialize an entire coverage model from scratch
   sess = tf.Session(config=util.get_config())
@@ -118,7 +131,8 @@ def convert_matmul_model(model):
   curr_ckpt = util.load_ckpt(saver, sess)
   print "restored."
 
-  sess.run({'w_full': model.w_full})
+  assign = tf.assign(w_full, tf.matmul(w, embedding, transpose_b=True))
+  sess.run(assign)
 
   # save this model and quit
   new_fname = curr_ckpt + '_wfull_init'
@@ -126,6 +140,7 @@ def convert_matmul_model(model):
   new_saver = tf.train.Saver() # this one will save all variables that now exist
   new_saver.save(sess, new_fname)
   print "saved."
+
   exit()
 
 def convert_to_coverage_model():
@@ -155,7 +170,7 @@ def convert_to_coverage_model():
   exit()
 
 
-def setup_training(model, batcher):
+def setup_training(model, batcher, hps, vocab_size):
   """Does setup before starting training (run_training)"""
   train_dir = os.path.join(FLAGS.log_root, "train")
   if not os.path.exists(train_dir): os.makedirs(train_dir)
@@ -168,7 +183,7 @@ def setup_training(model, batcher):
       convert_to_coverage_model()
     if FLAGS.convert_matmul:
       assert FLAGS.save_matmul
-      convert_matmul_model(model)
+      convert_matmul_model(hps, vocab_size)
 
     saver = tf.train.Saver(max_to_keep=1) # only keep 1 checkpoint at a time
 
@@ -292,37 +307,23 @@ def main(unused_argv):
     FLAGS.batch_size = FLAGS.beam_size
 
   # If single_pass=True, check we're in decode mode
-  if FLAGS.single_pass and FLAGS.mode!='decode':
+  if FLAGS.single_pass and FLAGS.mode != 'decode':
     raise Exception("The single_pass flag should only be True in decode mode")
 
   if FLAGS.restrictive_embeddings and not FLAGS.embeddings_path:
     raise Exception("Cannot use restrictive embeddings with no pretrained embeddings")
 
-  # Make a namedtuple hps, containing the values of the hyperparameters that the model needs
-  hparam_list = {
-    'mode',
-    'lr',
-    'adagrad_init_acc',
-    'rand_unif_init_mag',
-    'trunc_norm_init_std',
-    'max_grad_norm',
-    'enc_hidden_dim',
-    'dec_hidden_dim',
-    'emb_dim',
-    'batch_size',
-    'max_dec_steps',
-    'max_enc_steps',
-    'coverage',
-    'cov_loss_wt',
-    'pointer_gen',
-    'restrictive_embeddings',
-    'adam_optimizer',
-  }
+  settings_dict = {}
   hps_dict = {}
-  for key,val in FLAGS.__flags.iteritems(): # for each flag
-    if key in hparam_list: # if it's in the list
-      hps_dict[key] = val # add it to the dict
-  hps = namedtuple("HParams", hps_dict.keys())(**hps_dict)
+
+  for key, val in FLAGS.__flags.iteritems(): # for each flag
+    if key in Settings._fields:
+      settings_dict[key] = val
+    elif key in Hps._fields:
+      hps_dict[key] = val
+
+  settings = Settings(**settings_dict)
+  hps = Hps(**hps_dict)
 
   # Create a batcher object that will create minibatches of data
   batcher = Batcher(FLAGS.data_path, vocab, hps, single_pass=FLAGS.single_pass)
@@ -331,15 +332,14 @@ def main(unused_argv):
 
   if hps.mode == 'train':
     print "creating model..."
-    model = SummarizationModel(hps, vocab)
-    setup_training(model, batcher)
+    model = SummarizationModel(settings, hps, vocab)
+    setup_training(model, batcher, hps, vocab_size)
   elif hps.mode == 'eval':
-    model = SummarizationModel(hps, vocab)
+    model = SummarizationModel(settings, hps, vocab)
     run_eval(model, batcher, vocab)
   elif hps.mode == 'decode':
-    decode_model_hps = hps  # This will be the hyperparameters for the decoder model
     decode_model_hps = hps._replace(max_dec_steps=1) # The model is configured with max_dec_steps=1 because we only ever run one step of the decoder at a time (to do beam search). Note that the batcher is initialized with max_dec_steps equal to e.g. 100 because the batches need to contain the full summaries
-    model = SummarizationModel(decode_model_hps, vocab)
+    model = SummarizationModel(settings, decode_model_hps, vocab)
     decoder = BeamSearchDecoder(model, batcher, vocab)
     decoder.decode() # decode indefinitely (unless single_pass=True, in which case deocde the dataset exactly once)
   else:

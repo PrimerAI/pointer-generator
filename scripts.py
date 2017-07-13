@@ -261,7 +261,7 @@ def get_lexrank_summary(text):
         {0: [{'start': start, 'end': end} for start, end in sentence_spans]},
         [0],
     )
-    return ' '.join(sentence for (span_index, score), sentence in summary.values()[0])
+    return ' '.join(sentence for (span_index, score), sentence in summary.values()[0])[:120]
 
 def write_results():
     print '\t'.join(

@@ -94,18 +94,20 @@ class BeamSearchDecoder(object):
       original_abstract = batch.original_abstracts[0]  # string
 
       article_withunks = data.show_art_oovs(original_article, self._vocab) # string
-      abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab, (batch.art_oovs[0] if FLAGS.pointer_gen else None)) # string
+      abstract_withunks = data.show_abs_oovs(original_abstract, self._vocab, batch.art_oovs[0]) # string
 
       # Run beam search to get best Hypothesis
       t_beam = time.time()
-      best_hyp, best_score = beam_search.run_beam_search(self._sess, self._model, self._vocab, batch)
+      best_hyp, best_score = beam_search.run_beam_search(
+        self._sess, self._model, self._vocab, batch, FLAGS.beam_size, FLAGS.max_dec_steps,
+        FLAGS.min_dec_steps, FLAGS.trace_path
+      )
       scores.append(best_score)
       tf.logging.info("Time to decode one example: %f", time.time() - t_beam)
       tf.logging.info("Mean score: %s", sum(scores) / len(scores))
 
       # Extract the output ids from the hypothesis and convert back to words
-      output_ids = [int(t) for t in best_hyp.tokens[1:]]
-      decoded_words = data.outputids2words(output_ids, self._vocab, (batch.art_oovs[0] if FLAGS.pointer_gen else None))
+      decoded_words = best_hyp.token_strings[1:]
 
       # Remove the [STOP] token from decoded_words, if necessary
       try:
@@ -120,8 +122,7 @@ class BeamSearchDecoder(object):
         counter += 1 # this is how many examples we've decoded
       else:
         print_results(
-          article_withunks, abstract_withunks, decoded_output, best_hyp,
-          self._vocab.word2id(data.STOP_DECODING, None)
+          article_withunks, abstract_withunks, decoded_output, best_hyp, [best_score]
         ) # log output to screen
         self.write_for_attnvis(article_withunks, abstract_withunks, decoded_words, best_hyp.attn_dists, best_hyp.p_gens, best_hyp.log_probs) # write info to .json file for visualization tool
 
@@ -189,22 +190,21 @@ class BeamSearchDecoder(object):
         'abstract_str': make_html_safe(abstract),
         'attn_dists': attn_dists,
         'probs': np.exp(log_probs).tolist(),
+        'p_gens': p_gens,
     }
-    if FLAGS.pointer_gen:
-      to_write['p_gens'] = p_gens
     output_fname = os.path.join(self._decode_dir, 'attn_vis_data.json')
     with open(output_fname, 'w') as output_file:
       json.dump(to_write, output_file)
     tf.logging.info('Wrote visualization data to %s', output_fname)
 
 
-def print_results(article, abstract, decoded_output, hyp, stop_token):
+def print_results(article, abstract, decoded_output, hyp, scores):
   """Prints the article, the reference summmary and the decoded summary to screen"""
   print ""
   #tf.logging.info('ARTICLE:  %s', article)
   #tf.logging.info('REFERENCE SUMMARY: %s', abstract)
   tf.logging.info('GENERATED SUMMARY: %s', decoded_output)
-  tf.logging.info('LOG_PROB & COV_LOSS: %f, %f', hyp.avg_log_prob(stop_token), hyp.cov_loss)
+  tf.logging.info('SCORES: %s', ', '.join(str(x) for x in scores))
   print ""
 
 

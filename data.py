@@ -16,12 +16,12 @@
 
 """This file contains code to read the train/eval/test data from file and process it, and read the vocab data from file and process it"""
 
+import csv
 import glob
 import random
 import re
 import string
 import struct
-import csv
 from collections import defaultdict
 from tensorflow.core.example import example_pb2
 
@@ -147,6 +147,7 @@ class Vocab(object):
       raise ValueError('Id not found in vocab: %d' % word_id)
     return self._id_to_word[word_id]
 
+  @property
   def size(self):
     """Returns the total size of the vocabulary"""
     return self._count
@@ -162,7 +163,7 @@ class Vocab(object):
     with open(fpath, "w") as f:
       fieldnames = ['word']
       writer = csv.DictWriter(f, delimiter="\t", fieldnames=fieldnames)
-      for i in xrange(self.size()):
+      for i in xrange(self.size):
         writer.writerow({"word": self._id_to_word[i]})
 
 
@@ -225,29 +226,32 @@ def article2ids(article_words, vocab):
   """
   ids = []
   oovs = []
-  article_id_to_word_id = defaultdict(list) # for OOV ids
+  unk_article_id_to_word_id_list = defaultdict(list) # for OOV ids
+  unk_article_id_to_word_index = defaultdict(list)
   unk_ids = set(vocab.word2id('', token) for token in UNKNOWN_TOKENS)
 
-  for w, word_type in article_words:
+  for index, (w, word_type) in enumerate(article_words):
     i = vocab.word2id(w, word_type)
     if i in unk_ids: # If w is OOV
       if w not in oovs: # Add to list of OOVs
         oovs.append(w)
       oov_num = oovs.index(w) # This is 0 for the first article OOV, 1 for the second article OOV...
-      ids.append(vocab.size() + oov_num) # This is e.g. 50000 for the first article OOV, 50001 for the second...
-      article_id_to_word_id[ids[-1]].append(i)
+      ids.append(vocab.size + oov_num) # This is e.g. 50000 for the first article OOV, 50001 for the second...
+      unk_article_id_to_word_id_list[ids[-1]].append(i)
+      unk_article_id_to_word_index[ids[-1]].append(index)
     else:
       ids.append(i)
 
-  for id_ in article_id_to_word_id:
+  unk_article_id_to_word_id = {}
+  for article_id, word_ids in unk_article_id_to_word_id_list.iteritems():
     word_id_counts = defaultdict(int)
-    for word_id in article_id_to_word_id[id_]:
+    for word_id in word_ids:
       word_id_counts[word_id] += 1
     sorted_words = sorted(word_id_counts.items(), key=lambda pair: pair[1], reverse=True)
     top_word_id = sorted_words[0][0]
-    article_id_to_word_id[id_] = top_word_id
+    unk_article_id_to_word_id[article_id] = top_word_id
 
-  return ids, oovs, article_id_to_word_id
+  return ids, oovs, unk_article_id_to_word_id, unk_article_id_to_word_index
 
 
 def abstract2ids(abstract_words, vocab, article_oovs):
@@ -271,7 +275,7 @@ def abstract2ids(abstract_words, vocab, article_oovs):
     i = vocab.word2id(w, word_type)
     if i in unk_ids: # If w is an OOV word
       if w in article_oovs: # If w is an in-article OOV
-        vocab_idx = vocab.size() + article_oovs.index(w) # Map to its temporary article OOV number
+        vocab_idx = vocab.size + article_oovs.index(w) # Map to its temporary article OOV number
         ids.append(vocab_idx)
       else:
         i2 = vocab.word2id(w, None)
@@ -287,13 +291,13 @@ def abstract2ids(abstract_words, vocab, article_oovs):
   return ids
 
 
-def outputids2words(id_list, vocab, article_oovs):
+def outputid_to_word(id_, vocab, article_oovs):
   """
   Maps output ids to words, including mapping in-article OOVs from their temporary ids to the
   original OOV string (applicable in pointer-generator mode).
 
   Args:
-    id_list: list of ids (integers)
+    id_: integer
     vocab: Vocabulary object
     article_oovs: list of OOV words (strings) in the order corresponding to their temporary
       article OOV ids (that have been assigned in pointer-generator mode), or None (in baseline
@@ -302,19 +306,14 @@ def outputids2words(id_list, vocab, article_oovs):
   Returns:
     words: list of words (strings)
   """
-  words = []
-  for i in id_list:
-    try:
-      w = vocab.id2word(i) # might be [UNK]
-    except ValueError as e: # w is OOV
-      assert article_oovs is not None, "Error: model produced a word ID that isn't in the vocabulary. This should not happen in baseline (no pointer-generator) mode"
-      article_oov_idx = i - vocab.size()
-      try:
-        w = article_oovs[article_oov_idx]
-      except ValueError as e: # i doesn't correspond to an article oov
-        raise ValueError('Error: model produced word ID %i which corresponds to article OOV %i but this example only has %i article OOVs' % (i, article_oov_idx, len(article_oovs)))
-    words.append(w)
-  return words
+  try:
+    w = vocab.id2word(id_) # might be [UNK]
+  except ValueError as e: # w is OOV
+    assert article_oovs is not None, "Error: model produced a word ID that isn't in the vocabulary. This should not happen in baseline (no pointer-generator) mode"
+    article_oov_idx = id_ - vocab.size
+    w = article_oovs[article_oov_idx]
+
+  return w
 
 
 def show_art_oovs(article, vocab):
