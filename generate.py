@@ -58,7 +58,7 @@ def _load_model():
     saver.restore(_sess, ckpt_state.model_checkpoint_path)
 
 
-def generate_summary(article, ideal_summary_length_tokens=60):
+def generate_summary(spacy_article, ideal_summary_length_tokens=60):
     from batcher import Batch, Example
     from beam_search import run_beam_search
     from io_processing import process_article, process_output
@@ -66,12 +66,9 @@ def generate_summary(article, ideal_summary_length_tokens=60):
     if _model is None:
         _load_model()
 
-    if not isinstance(article, unicode):
-        article = unicode(article, 'utf-8')
-
-    article_tokens, orig_article_tokens = process_article(article)
+    article_tokens, orig_article_tokens = process_article(spacy_article)
     if len(article_tokens) <= ideal_summary_length_tokens:
-        return article
+        return spacy_article.text
     min_summary_length = min(10 + len(article_tokens) / 10, 2 * ideal_summary_length_tokens / 3)
     max_summary_length = min(10 + len(article_tokens) / 5, 3 * ideal_summary_length_tokens / 2)
 
@@ -85,8 +82,5 @@ def generate_summary(article, ideal_summary_length_tokens=60):
     )
 
     # Extract the output ids from the hypothesis and convert back to words
-    decoded_tokens = best_hyp.tokens[1:]
-    return process_output(
-        decoded_tokens, orig_article_tokens, example.article_id_to_word_index, _vocab
-    )
+    return process_output(best_hyp.token_strings[1:], orig_article_tokens, _vocab)
 

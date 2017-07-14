@@ -100,11 +100,16 @@ class Hypothesis(object):
       return -(10. ** 6)
 
     token_scores = []
+    has_seen_period = False
+
     for i, (token, log_prob) in enumerate(zip(self.tokens, self.log_probs)):
       log_prob -= float(token in key_token_ids['pronouns'])
       dec_token = article_id_to_word_id.get(token, token)
-      log_prob += 10. / (i + 4.) * float(dec_token in key_token_ids['people'])
-      log_prob += 5. / (i + 4) * float(dec_token in key_token_ids['other_entities'])
+      if not has_seen_period:
+        log_prob += 6. / (i + 4.) * float(dec_token in key_token_ids['people'])
+        log_prob += 3. / (i + 4.) * float(dec_token in key_token_ids['other_entities'])
+        has_seen_period = token == key_token_ids['period']
+
       token_scores.append(log_prob)
 
     self._scores[is_complete] = sum(token_scores) / len(token_scores) - self.cov_loss
@@ -128,6 +133,7 @@ def get_key_token_ids(vocab):
   return {
     'stop': vocab.word2id(data.STOP_DECODING, None),
     'comma': vocab.word2id(',', None),
+    'period': vocab.word2id('.', None),
     'pronouns': {vocab.word2id(word, None) for word in ('he', 'she', 'him', 'her')},
     'people': {vocab.word2id(word, None) for word in data.PERSON_TOKENS + ('[ORG]',)},
     'other_entities': {

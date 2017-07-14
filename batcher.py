@@ -65,10 +65,9 @@ class Example(object):
     self.dec_len = len(self.dec_input)
 
     # Store a version of the enc_input where in-article OOVs are represented by their temporary OOV id; also store the in-article OOVs words themselves
-    (
-      self.enc_input_extend_vocab, self.article_oovs, self.article_id_to_word_id,
-      self.article_id_to_word_index
-    ) = data.article2ids(article_words, vocab)
+    self.enc_input_extend_vocab, self.article_oovs, self.article_id_to_word_id = data.article2ids(
+      article_words, vocab
+    )
 
     # Get a verison of the reference summary where in-article OOVs are represented by their temporary article OOV id
     abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)

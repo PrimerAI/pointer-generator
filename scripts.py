@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import os
 import spacy
@@ -10,8 +11,7 @@ from tensorflow.core.example import example_pb2
 from data import N_FREE_TOKENS, Vocab
 from generate import generate_summary
 from make_datafiles import get_art_abs, process_article_abstract
-from pygov.analytic_pipeline.common.nlp.tokenizers import NewsSentenceTokenizer
-from pygov.analytic_pipeline.common.summary import build_summaries
+from pygov.analytic_pipeline.common.summary import compute_summaries
 from pygov.analytic_pipeline.document_pipeline import SingleDocument
 
 
@@ -191,7 +191,7 @@ RESULTS_ABSTRACT_DIR = os.path.join(RESULTS_DIR, 'abstract')
 SUMMARY_OUTPUT_LOCATIONS = (
     ('Reference', RESULTS_ABSTRACT_DIR, 'abstract_%d.txt'),
     #('Normal', os.path.join(RESULTS_DIR, 'decoded_normal'), '%06d_decoded.txt'),
-    #('Coverage', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
+    ('Coverage', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
     #('Coverage v4', os.path.join(RESULTS_DIR, 'decoded_coverage_4'), '%06d_decoded.txt'),
     #('Restrictive', os.path.join(RESULTS_DIR, 'decoded_restr'), '%06d_decoded.txt'),
     #('Corrective', os.path.join(RESULTS_DIR, 'decoded_corrective'), '%06d_decoded.txt'),
@@ -255,21 +255,23 @@ def find_articles():
         with open(abstract_path, 'w') as f:
             f.write(abstract)
 
-sentence_tokenizer = NewsSentenceTokenizer()
-def get_lexrank_summary(text):
-    sentence_spans = sentence_tokenizer.span_tokenize(text)
-    summary = build_summaries(
-        {0: text},
-        {0: [{'start': start, 'end': end} for start, end in sentence_spans]},
+def get_lexrank_summary(doc):
+    summaries = compute_summaries(
         [0],
+        {0: doc.text()},
+        {0: [{'start': span[0], 'end': span[1]} for span in doc.sentence_spans()]},
+        {},
     )
-    return ' '.join(sentence for (span_index, score), sentence in summary.values()[0])[:120]
+    return summaries[0]['summary']
 
-def write_results():
-    print '\t'.join(
-        ['Article'] +
-        [name for name, dir, filename in SUMMARY_OUTPUT_LOCATIONS] +
-        ['Lexrank']
+def write_results(out_file):
+    out = open(out_file, 'w')
+    out.write(
+        '\t'.join(
+            ['Article'] +
+            [name for name, dir, filename in SUMMARY_OUTPUT_LOCATIONS] +
+            ['Lexrank', 'Seq-to-seq ready']
+        ) + '\n'
     )
 
     for filename in os.listdir(RESULTS_ARTICLE_DIR):
@@ -278,8 +280,6 @@ def write_results():
         # Read article
         with open(os.path.join(RESULTS_ARTICLE_DIR, filename)) as f:
             article_text = unicode(f.read(), 'utf-8').replace(u'\xa0', ' ')
-        doc = SingleDocument(0, raw={'body': article_text})
-        clean_article = doc.clean_text_and_raw_spans()[0]
 
         # Read pregenerated seq-to-seq summaries
         summaries = []
@@ -287,18 +287,22 @@ def write_results():
             with open(os.path.join(summary_dir, summary_filename % article_id)) as f:
                 summaries.append(f.read())
 
+        doc = SingleDocument(0, raw={'body': article_text})
+
         # Generate lexrank summary on the fly
-        summaries.append(get_lexrank_summary(clean_article).encode('utf-8'))
+        summaries.append(get_lexrank_summary(doc))
 
-        # Generate seq-to-seq summary on the fly!
-
-        summaries.append(generate_summary(clean_article))
+        # Generate seq-to-seq summary on the fly
+        spacy_article = doc.spacy_text()
+        summaries.append(generate_summary(spacy_article))
 
         # Print all results together
-        print '\t'.join([
-            string.replace('\t', ' ').replace('\n', ' ')
-            for string in [clean_article[:500].encode('utf-8')] + summaries
-        ])
+        out.write(
+            '\t'.join([
+                string.encode('utf-8').replace('\t', ' ').replace('\n', ' ')
+                for string in [doc.text()] + summaries
+            ]) + '\n'
+        )
 
 ######################################################
 # Generate sample summaries
@@ -331,10 +335,37 @@ def generate_input_file(out_file):
             f.write(struct.pack('%ds' % str_len, tf_example_str))
 
 
+def get_cable_results(data_file, out_file):
+    out = open(out_file, 'w')
+    out.write('\t'.join(['Cable', 'Lexrank', 'Seq-to-seq']) + '\n')
+
+    with open(data_file) as f:
+        cables = json.load(f)
+
+    for cable in cables:
+        cable = cable.lower()
+        doc = SingleDocument(0, raw={'body': cable})
+        if len(doc.text()) < 500:
+            continue
+
+        lexrank = get_lexrank_summary(doc)
+        seq2seq = generate_summary(doc.spacy_text())
+
+        out.write(
+            '\t'.join([
+                string.encode('utf-8').replace('\t', ' ').replace('\n', ' ')
+                for string in [cable, lexrank, seq2seq]
+            ]) + '\n'
+        )
+        out.flush()
+
+    out.close()
+
 if __name__ == '__main__':
     #compute_reduced_embeddings_original_vocab(
     #    sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
     #)
-    write_results()
+    write_results(sys.argv[1])
     #find_articles()
     #generate_input_file(sys.argv[1])
+    #get_cable_results(sys.argv[1], sys.argv[2])

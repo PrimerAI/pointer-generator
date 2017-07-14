@@ -124,12 +124,12 @@ class Vocab(object):
         self._id_to_word[self._count] = w
         self._count += 1
         if max_size != 0 and self._count >= max_size:
-          print "max_size of vocab was specified as %i; we now have %i words. Stopping reading." % (max_size, self._count)
           break
 
     if max_size != 0 and self._count < max_size:
-      raise Exception('Could not read full vocab of size %d, only %d words found' % (max_size, self._count))
-    print "Finished constructing vocabulary of %i total words. Last word added: %s" % (self._count, self._id_to_word[self._count-1])
+      raise Exception(
+        'Could not read full vocab of size %d, only %d words found' % (max_size, self._count)
+      )
 
   def word2id(self, word, word_type):
     """Returns the id (integer) of a word (string). Returns [UNK] id if word is OOV."""
@@ -227,7 +227,6 @@ def article2ids(article_words, vocab):
   ids = []
   oovs = []
   unk_article_id_to_word_id_list = defaultdict(list) # for OOV ids
-  unk_article_id_to_word_index = defaultdict(list)
   unk_ids = set(vocab.word2id('', token) for token in UNKNOWN_TOKENS)
 
   for index, (w, word_type) in enumerate(article_words):
@@ -238,7 +237,6 @@ def article2ids(article_words, vocab):
       oov_num = oovs.index(w) # This is 0 for the first article OOV, 1 for the second article OOV...
       ids.append(vocab.size + oov_num) # This is e.g. 50000 for the first article OOV, 50001 for the second...
       unk_article_id_to_word_id_list[ids[-1]].append(i)
-      unk_article_id_to_word_index[ids[-1]].append(index)
     else:
       ids.append(i)
 
@@ -251,7 +249,7 @@ def article2ids(article_words, vocab):
     top_word_id = sorted_words[0][0]
     unk_article_id_to_word_id[article_id] = top_word_id
 
-  return ids, oovs, unk_article_id_to_word_id, unk_article_id_to_word_index
+  return ids, oovs, unk_article_id_to_word_id
 
 
 def abstract2ids(abstract_words, vocab, article_oovs):
