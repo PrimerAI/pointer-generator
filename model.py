@@ -79,7 +79,9 @@ class SummarizationModel(object):
     # decoder part
     self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
     self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
+    self._target_people_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_orig_batch')
     self._padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='padding_mask')
+    self._people_ids = tf.placeholder(tf.int32, [hps.batch_size, None], name='people_ids')
 
     if hps.mode == "decode" and hps.coverage:
       self.prev_coverage = tf.placeholder(tf.float32, [hps.batch_size, None], name='prev_coverage')
@@ -106,7 +108,9 @@ class SummarizationModel(object):
     if not just_enc:
       feed_dict[self._dec_batch] = dec_batch
       feed_dict[self._target_batch] = batch.target_batch
+      feed_dict[self._target_people_batch] = batch.target_people_batch
       feed_dict[self._padding_mask] = batch.padding_mask
+      feed_dict[self._people_ids] = batch.people_ids
 
     return feed_dict
 
@@ -385,23 +389,39 @@ class SummarizationModel(object):
           # Calculate the loss per step
           # This is fiddly; we use tf.gather_nd to pick out the log probabilities of the target words
           loss_per_step = [] # will be list length max_dec_steps containing shape (batch_size)
+          other_people_loss_per_step = [] # will be list length max_dec_steps containing shape (batch_size)
           batch_nums = tf.range(0, limit=hps.batch_size) # shape (batch_size)
+
           for dec_step, log_dist in enumerate(log_dists):
-            targets = self._target_batch[:,dec_step] # The indices of the target words. shape (batch_size)
+            targets = self._target_batch[:, dec_step] # The indices of the target words. shape (batch_size)
             indices = tf.stack((batch_nums, targets), axis=1) # shape (batch_size, 2)
             losses = tf.gather_nd(-log_dist, indices) # shape (batch_size). loss on this step for each batch
             loss_per_step.append(losses)
 
+            other_people_loss_per_batch = []
+            for batch_num, person_ids in enumerate(self._people_ids):
+              batch_indices = tf.constant(batch_num, shape=[len(person_ids)])
+              people_loss_indices = tf.stack((batch_indices, person_ids), axis=1)
+              people_losses = tf.gather_nd(-log_dist, people_loss_indices)
+              other_people_loss_per_batch.append(tf.reduce_mean(people_losses))
+            other_people_loss_per_step.append(other_people_loss_per_batch)
+
           # Apply padding_mask mask and get loss
           self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
           tf.summary.scalar('loss', self._loss)
+
+          # Calculate people losses
+          correct_people_loss = _mask_and_avg(loss_per_step, self._target_people_batch)
+          other_people_loss = _mask_and_avg(other_people_loss_per_step, self._target_people_batch)
+          self._people_loss = correct_people_loss - other_people_loss
+          tf.summary.scalar('people_loss', self._people_loss)
 
           # Calculate coverage loss from the attention distributions
           if hps.coverage:
             with tf.variable_scope('coverage_loss'):
               self._coverage_loss = _coverage_loss(self.attn_dists, self._padding_mask)
               tf.summary.scalar('coverage_loss', self._coverage_loss)
-            self._total_loss = self._loss + hps.cov_loss_wt * self._coverage_loss
+            self._total_loss = self._loss + self._people_loss + hps.cov_loss_wt * self._coverage_loss
             tf.summary.scalar('total_loss', self._total_loss)
 
     if hps.mode == "decode":
@@ -418,7 +438,7 @@ class SummarizationModel(object):
   def _add_train_op(self):
     """Sets self._train_op, the op to run for training."""
     # Take gradients of the trainable variables w.r.t. the loss function to minimize
-    loss_to_minimize = self._total_loss if self._hps.coverage else self._loss
+    loss_to_minimize = self._total_loss if self._hps.coverage else self._loss + self._people_loss
     tvars = tf.trainable_variables()
     gradients = tf.gradients(loss_to_minimize, tvars, aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE)
 
@@ -651,8 +671,8 @@ def _mask_and_avg(values, padding_mask):
   """
 
   dec_lens = tf.reduce_sum(padding_mask, axis=1) # shape batch_size. float32
-  values_per_step = [v * padding_mask[:,dec_step] for dec_step,v in enumerate(values)]
-  values_per_ex = sum(values_per_step)/dec_lens # shape (batch_size); normalized value for each batch member
+  values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
+  values_per_ex = sum(values_per_step) / dec_lens # shape (batch_size); normalized value for each batch member
   return tf.reduce_mean(values_per_ex) # overall average
 
 

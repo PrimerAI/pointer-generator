@@ -80,7 +80,8 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
     best_hyp, best_score = run_beam_search(
         _sess, _model, _vocab, batch, _beam_size, max_summary_length, min_summary_length
     )
+    print best_score
 
     # Extract the output ids from the hypothesis and convert back to words
-    return process_output(best_hyp.token_strings[1:], orig_article_tokens, _vocab)
+    return process_output(best_hyp.token_strings[1:], orig_article_tokens)
 

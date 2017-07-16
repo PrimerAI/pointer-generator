@@ -99,20 +99,10 @@ class Hypothesis(object):
     if is_complete and language_check.has_poor_grammar(self.token_strings):
       return -(10. ** 6)
 
-    token_scores = []
-    has_seen_period = False
+    pronoun_score = sum(float(token in key_token_ids['pronouns']) for token in self.tokens)
+    log_probs = np.array(self.log_probs)
 
-    for i, (token, log_prob) in enumerate(zip(self.tokens, self.log_probs)):
-      log_prob -= float(token in key_token_ids['pronouns'])
-      dec_token = article_id_to_word_id.get(token, token)
-      if not has_seen_period:
-        log_prob += 6. / (i + 4.) * float(dec_token in key_token_ids['people'])
-        log_prob += 3. / (i + 4.) * float(dec_token in key_token_ids['other_entities'])
-        has_seen_period = token == key_token_ids['period']
-
-      token_scores.append(log_prob)
-
-    self._scores[is_complete] = sum(token_scores) / len(token_scores) - self.cov_loss
+    self._scores[is_complete] = log_probs.mean() - pronoun_score
     return self._scores[is_complete]
 
 
@@ -228,6 +218,7 @@ def run_beam_search(
           results.append(h)
       elif h.latest_token >= data.N_FREE_TOKENS:
         # hasn't reached stop token and generated non-unk token, so continue to extend this hypothesis
+        #print ' '.join(['%s(%.2f)' % (st, np.exp(lp)) for st, lp in zip(h.token_strings, h.log_probs)])
         hyps.append(h)
       if len(hyps) == beam_size or len(results) == 4 * beam_size:
         # Once we've collected beam_size-many hypotheses for the next step, or beam_size-many complete hypotheses, stop.

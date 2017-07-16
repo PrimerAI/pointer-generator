@@ -59,15 +59,22 @@ class Example(object):
     abs_ids = [vocab.word2id(w, word_type) for w, word_type in abstract_words] # list of word ids; OOVs are represented by the id for UNK token
 
     # Get the decoder input sequence and target sequence
-    self.dec_input, self.target = self.get_dec_inp_targ_seqs(
+    self.dec_input, target_orig = self.get_dec_inp_targ_seqs(
       abs_ids, hps.max_dec_steps, start_decoding, stop_decoding
     )
     self.dec_len = len(self.dec_input)
+    self.target_people = [float(3 <= to <= 19) for to in target_orig]
 
     # Store a version of the enc_input where in-article OOVs are represented by their temporary OOV id; also store the in-article OOVs words themselves
     self.enc_input_extend_vocab, self.article_oovs, self.article_id_to_word_id = data.article2ids(
       article_words, vocab
     )
+
+    # Get list of people ids
+    self.people_ids = []
+    for article_id, word_id in self.article_id_to_word_id.iteritems():
+      if 3 <= word_id <= 19:
+        self.people_ids.append(article_id)
 
     # Get a verison of the reference summary where in-article OOVs are represented by their temporary article OOV id
     abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
@@ -204,14 +211,18 @@ class Batch(object):
     # Note: our decoder inputs and targets must be the same length for each batch (second dimension = max_dec_steps) because we do not use a dynamic_rnn for decoding. However I believe this is possible, or will soon be possible, with Tensorflow 1.0, in which case it may be best to upgrade to that.
     self.dec_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
     self.target_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
+    self.target_people_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
     self.padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
+    self.people_ids = []
 
     # Fill in the numpy arrays
     for i, ex in enumerate(example_list):
       self.dec_batch[i, :] = ex.dec_input[:]
       self.target_batch[i, :] = ex.target[:]
+      self.target_people_batch[i, :] = ex.target_people[:]
       for j in xrange(ex.dec_len):
         self.padding_mask[i][j] = 1
+      self.people_ids.append(ex.people_ids)
 
 
   def store_orig_strings(self, example_list):

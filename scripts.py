@@ -268,7 +268,6 @@ def write_results(out_file):
     out = open(out_file, 'w')
     out.write(
         '\t'.join(
-            ['Article'] +
             [name for name, dir, filename in SUMMARY_OUTPUT_LOCATIONS] +
             ['Lexrank', 'Seq-to-seq ready']
         ) + '\n'
@@ -297,12 +296,16 @@ def write_results(out_file):
         summaries.append(generate_summary(spacy_article))
 
         # Print all results together
-        out.write(
-            '\t'.join([
-                string.encode('utf-8').replace('\t', ' ').replace('\n', ' ')
-                for string in [doc.text()] + summaries
-            ]) + '\n'
-        )
+        for i, summ in enumerate(summaries):
+            if isinstance(summ, unicode):
+                summ = summ.encode('utf-8')
+            out.write(summ.replace('\t', ' ').replace('\n', ' '))
+            if i == len(summaries) - 1:
+                out.write('\n')
+            else:
+                out.write('\t')
+
+    out.close()
 
 ######################################################
 # Generate sample summaries
@@ -342,8 +345,7 @@ def get_cable_results(data_file, out_file):
     with open(data_file) as f:
         cables = json.load(f)
 
-    for cable in cables:
-        cable = cable.lower()
+    for cable in cables[:100]:
         doc = SingleDocument(0, raw={'body': cable})
         if len(doc.text()) < 500:
             continue
@@ -361,11 +363,24 @@ def get_cable_results(data_file, out_file):
 
     out.close()
 
+
+def print_results():
+    for filename in os.listdir(RESULTS_ARTICLE_DIR):
+        with open(os.path.join(RESULTS_ARTICLE_DIR, filename)) as f:
+            article_text = unicode(f.read(), 'utf-8').replace(u'\xa0', ' ')
+
+        doc = SingleDocument(0, raw={'body': article_text})
+        spacy_article = doc.spacy_text()
+        print '#################'
+        print generate_summary(spacy_article)
+
+
 if __name__ == '__main__':
     #compute_reduced_embeddings_original_vocab(
     #    sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
     #)
-    write_results(sys.argv[1])
+    #write_results(sys.argv[1])
     #find_articles()
     #generate_input_file(sys.argv[1])
     #get_cable_results(sys.argv[1], sys.argv[2])
+    print_results()

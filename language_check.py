@@ -1,5 +1,10 @@
 
-_prepositions = {
+_articles_and_prepositions = {
+    # articles
+    'a',
+    'an',
+    'the',
+    # prepositions
     'aboard',
     'about',
     'above',
@@ -87,7 +92,7 @@ def has_repeated_n_gram(tokens, disallowed_n=3):
 
 def sent_end_on_preposition(token_strings):
     for i in range(len(token_strings) - 1):
-        if token_strings[i] in _prepositions and token_strings[i + 1] == '.':
+        if token_strings[i] in _articles_and_prepositions and token_strings[i + 1] == '.':
             return True
     return False
 
