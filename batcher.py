@@ -124,6 +124,8 @@ class Example(object):
       self.dec_input.append(pad_id)
     while len(self.target) < max_len:
       self.target.append(pad_id)
+    while len(self.target_people) < max_len:
+      self.target_people.append(0.)
 
 
   def pad_encoder_input(self, max_len, pad_id):
@@ -213,7 +215,8 @@ class Batch(object):
     self.target_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
     self.target_people_batch = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.int32)
     self.padding_mask = np.zeros((hps.batch_size, hps.max_dec_steps), dtype=np.float32)
-    self.people_ids = []
+    self.people_lens = [len(ex.people_ids) for ex in example_list]
+    self.people_ids = np.zeros((hps.batch_size, max(self.people_lens)), dtype=np.int32)
 
     # Fill in the numpy arrays
     for i, ex in enumerate(example_list):
@@ -222,7 +225,7 @@ class Batch(object):
       self.target_people_batch[i, :] = ex.target_people[:]
       for j in xrange(ex.dec_len):
         self.padding_mask[i][j] = 1
-      self.people_ids.append(ex.people_ids)
+      self.people_ids[i, :len(ex.people_ids)] = ex.people_ids[:]
 
 
   def store_orig_strings(self, example_list):
@@ -333,7 +336,7 @@ class Batcher(object):
       if self._hps.mode != 'decode':
         # Get bucketing_cache_size-many batches of Examples into a list, then sort
         inputs = []
-        for _ in xrange(self._hps.batch_size * self._bucketing_cache_size):
+        for k in xrange(self._hps.batch_size * self._bucketing_cache_size):
           inputs.append(self._example_queue.get())
         inputs = sorted(inputs, key=lambda inp: inp.enc_len) # sort by length of encoder sequence
 

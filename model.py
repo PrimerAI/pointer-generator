@@ -79,8 +79,9 @@ class SummarizationModel(object):
     # decoder part
     self._dec_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='dec_batch')
     self._target_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_batch')
-    self._target_people_batch = tf.placeholder(tf.int32, [hps.batch_size, hps.max_dec_steps], name='target_orig_batch')
+    self._target_people_batch = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='target_orig_batch')
     self._padding_mask = tf.placeholder(tf.float32, [hps.batch_size, hps.max_dec_steps], name='padding_mask')
+    self._people_lens = tf.placeholder(tf.int32, [hps.batch_size], name='people_lens')
     self._people_ids = tf.placeholder(tf.int32, [hps.batch_size, None], name='people_ids')
 
     if hps.mode == "decode" and hps.coverage:
@@ -110,8 +111,9 @@ class SummarizationModel(object):
       feed_dict[self._target_batch] = batch.target_batch
       feed_dict[self._target_people_batch] = batch.target_people_batch
       feed_dict[self._padding_mask] = batch.padding_mask
+      feed_dict[self._people_lens] = batch.people_lens
       feed_dict[self._people_ids] = batch.people_ids
-
+    
     return feed_dict
 
 
@@ -399,11 +401,15 @@ class SummarizationModel(object):
             loss_per_step.append(losses)
 
             other_people_loss_per_batch = []
-            for batch_num, person_ids in enumerate(self._people_ids):
-              batch_indices = tf.constant(batch_num, shape=[len(person_ids)])
-              people_loss_indices = tf.stack((batch_indices, person_ids), axis=1)
+            for batch_num in range(hps.batch_size):
+              batch_people_lens = self._people_lens[batch_num]
+              batch_people_ids = self._people_ids[batch_num, :batch_people_lens]
+              batch_indices = batch_num * tf.ones_like(batch_people_ids, dtype=tf.int32)
+              people_loss_indices = tf.stack((batch_indices, batch_people_ids), axis=1)
               people_losses = tf.gather_nd(-log_dist, people_loss_indices)
-              other_people_loss_per_batch.append(tf.reduce_mean(people_losses))
+              people_losses = tf.reduce_mean(people_losses)
+              people_losses = tf.where(tf.is_nan(people_losses), tf.zeros_like(people_losses), people_losses)
+              other_people_loss_per_batch.append(people_losses)
             other_people_loss_per_step.append(other_people_loss_per_batch)
 
           # Apply padding_mask mask and get loss
@@ -413,7 +419,7 @@ class SummarizationModel(object):
           # Calculate people losses
           correct_people_loss = _mask_and_avg(loss_per_step, self._target_people_batch)
           other_people_loss = _mask_and_avg(other_people_loss_per_step, self._target_people_batch)
-          self._people_loss = correct_people_loss - other_people_loss
+          self._people_loss = .4 * correct_people_loss - .2 * other_people_loss
           tf.summary.scalar('people_loss', self._people_loss)
 
           # Calculate coverage loss from the attention distributions
@@ -481,6 +487,7 @@ class SummarizationModel(object):
       batch, get_outputs=use_generated_inputs
     )
     results = sess.run(to_return, feed_dict)
+
     if not use_generated_inputs:
       return results
 
@@ -672,7 +679,7 @@ def _mask_and_avg(values, padding_mask):
 
   dec_lens = tf.reduce_sum(padding_mask, axis=1) # shape batch_size. float32
   values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
-  values_per_ex = sum(values_per_step) / dec_lens # shape (batch_size); normalized value for each batch member
+  values_per_ex = sum(values_per_step) / tf.maximum(1., dec_lens) # shape (batch_size); normalized value for each batch member
   return tf.reduce_mean(values_per_ex) # overall average
 
 
