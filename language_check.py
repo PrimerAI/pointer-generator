@@ -79,6 +79,9 @@ _articles_and_prepositions = {
 
 
 def has_repeated_n_gram(tokens, disallowed_n=3):
+    """
+    Returns whether the sequence has any n_grams repeated.
+    """
     seen_n_grams = set()
 
     for i in range(len(tokens) - disallowed_n + 1):
@@ -90,7 +93,10 @@ def has_repeated_n_gram(tokens, disallowed_n=3):
     return False
 
 
-def sent_end_on_preposition(token_strings):
+def sent_end_on_bad_word(token_strings):
+    """
+    Returns whether there is an article or preposition that precedes a period.
+    """
     for i in range(len(token_strings) - 1):
         if token_strings[i] in _articles_and_prepositions and token_strings[i + 1] == '.':
             return True
@@ -98,6 +104,10 @@ def sent_end_on_preposition(token_strings):
 
 
 def has_poor_grammar(token_strings):
+    """
+    Returns whether the output has an odd number of double quotes or if it does not have balanced
+    parentheses.
+    """
     has_open_left_parens = False
     quote_count = 0
 
@@ -115,4 +125,4 @@ def has_poor_grammar(token_strings):
         elif token == '"':
             quote_count += 1
 
-    return quote_count % 2 == 1
+    return quote_count % 2 == 1 or has_open_left_parens

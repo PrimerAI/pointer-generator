@@ -191,7 +191,7 @@ RESULTS_ABSTRACT_DIR = os.path.join(RESULTS_DIR, 'abstract')
 SUMMARY_OUTPUT_LOCATIONS = (
     ('Reference', RESULTS_ABSTRACT_DIR, 'abstract_%d.txt'),
     #('Normal', os.path.join(RESULTS_DIR, 'decoded_normal'), '%06d_decoded.txt'),
-    ('Coverage', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
+    #('Coverage', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
     #('Coverage v4', os.path.join(RESULTS_DIR, 'decoded_coverage_4'), '%06d_decoded.txt'),
     #('Restrictive', os.path.join(RESULTS_DIR, 'decoded_restr'), '%06d_decoded.txt'),
     #('Corrective', os.path.join(RESULTS_DIR, 'decoded_corrective'), '%06d_decoded.txt'),
@@ -304,6 +304,8 @@ def write_results(out_file):
                 out.write('\n')
             else:
                 out.write('\t')
+
+        out.flush()
 
     out.close()
 
