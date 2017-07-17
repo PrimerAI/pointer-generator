@@ -64,6 +64,7 @@ tf.app.flags.DEFINE_boolean('coverage', False, 'Use coverage mechanism. Note, th
 tf.app.flags.DEFINE_float('cov_loss_wt', 1.0, 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
 tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-coverage model to a coverage model. Turn this on and run in train mode. Your current model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
 tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
+tf.app.flags.DEFINE_float('people_loss_wt', 0., 'If set, will add a loss for people tokens')
 
 tf.app.flags.DEFINE_boolean('convert_matmul', False, 'Convert to saved matmul model ')
 tf.app.flags.DEFINE_boolean('save_matmul', False, 'Use matmul model.')

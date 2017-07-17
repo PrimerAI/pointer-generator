@@ -49,6 +49,7 @@ Hps = namedtuple('Hyperparameters', (
   'max_enc_steps',
   'max_grad_norm',
   'mode',
+  'people_loss_wt',
   'rand_unif_init_mag',
   'restrictive_embeddings',
   'save_matmul',
@@ -400,27 +401,32 @@ class SummarizationModel(object):
             losses = tf.gather_nd(-log_dist, indices) # shape (batch_size). loss on this step for each batch
             loss_per_step.append(losses)
 
-            other_people_loss_per_batch = []
-            for batch_num in range(hps.batch_size):
-              batch_people_lens = self._people_lens[batch_num]
-              batch_people_ids = self._people_ids[batch_num, :batch_people_lens]
-              batch_indices = batch_num * tf.ones_like(batch_people_ids, dtype=tf.int32)
-              people_loss_indices = tf.stack((batch_indices, batch_people_ids), axis=1)
-              people_losses = tf.gather_nd(-log_dist, people_loss_indices)
-              people_losses = tf.reduce_mean(people_losses)
-              people_losses = tf.where(tf.is_nan(people_losses), tf.zeros_like(people_losses), people_losses)
-              other_people_loss_per_batch.append(people_losses)
-            other_people_loss_per_step.append(other_people_loss_per_batch)
+            if hps.people_loss_wt:
+              other_people_loss_per_batch = []
+              for batch_num in range(hps.batch_size):
+                batch_people_lens = self._people_lens[batch_num]
+                batch_people_ids = self._people_ids[batch_num, :batch_people_lens]
+                batch_indices = batch_num * tf.ones_like(batch_people_ids, dtype=tf.int32)
+                people_loss_indices = tf.stack((batch_indices, batch_people_ids), axis=1)
+                people_losses = tf.gather_nd(-log_dist, people_loss_indices)
+                people_losses = tf.reduce_mean(people_losses)
+                people_losses = tf.where(tf.is_nan(people_losses), tf.zeros_like(people_losses), people_losses)
+                other_people_loss_per_batch.append(people_losses)
+              other_people_loss_per_step.append(other_people_loss_per_batch)
 
           # Apply padding_mask mask and get loss
           self._loss = _mask_and_avg(loss_per_step, self._padding_mask)
           tf.summary.scalar('loss', self._loss)
 
-          # Calculate people losses
-          correct_people_loss = _mask_and_avg(loss_per_step, self._target_people_batch)
-          other_people_loss = _mask_and_avg(other_people_loss_per_step, self._target_people_batch)
-          self._people_loss = .4 * correct_people_loss - .2 * other_people_loss
-          tf.summary.scalar('people_loss', self._people_loss)
+          if hps.people_loss_wt:
+            # Calculate people losses
+            correct_people_loss = _mask_and_avg(loss_per_step, self._target_people_batch)
+            other_people_loss = _mask_and_avg(other_people_loss_per_step, self._target_people_batch)
+            people_loss = .2 * correct_people_loss - .1 * other_people_loss
+            tf.summary.scalar('people_loss', people_loss)
+            self._people_loss = hps.people_loss_wt * people_loss
+          else:
+            self._people_loss = 0.
 
           # Calculate coverage loss from the attention distributions
           if hps.coverage:
