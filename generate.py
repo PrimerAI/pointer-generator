@@ -4,7 +4,7 @@ Library method to summarize given text.
 import os
 
 
-_model_dir = 'saved_model_people'
+_model_dir = 'saved_model_normal'
 _vocab_path = os.path.join(_model_dir, 'vocab')
 _vocab_size = 20000
 _beam_size = 4

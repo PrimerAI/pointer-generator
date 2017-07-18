@@ -10,7 +10,7 @@ from tensorflow.core.example import example_pb2
 
 from data import N_FREE_TOKENS, Vocab
 from generate import generate_summary
-from make_datafiles import get_art_abs, process_article_abstract
+from make_datafiles import get_art_abs
 from pygov.analytic_pipeline.common.summary import compute_summaries
 from pygov.analytic_pipeline.document_pipeline import SingleDocument
 
@@ -312,33 +312,6 @@ def write_results(out_file):
 ######################################################
 # Generate sample summaries
 ######################################################
-
-def generate_input_file(out_file):
-    data = [None] * N_ARTICLES
-
-    for filename in os.listdir(RESULTS_ARTICLE_DIR):
-        article_id = int(filename.split('.')[0].split('_')[1])
-        with open(os.path.join(RESULTS_ARTICLE_DIR, filename)) as f:
-            article_text = unicode(f.read(), 'utf-8').replace(u'\xa0', ' ')
-
-        article_tokens, abstract_tokens = process_article_abstract(
-            filename, article_text, 'ABSTRACT'
-        )
-        assert len(abstract_tokens) == 1
-        article_processed = ' '.join(article_tokens).encode('utf-8')
-
-        tf_example = example_pb2.Example()
-        tf_example.features.feature['article'].bytes_list.value.extend([article_processed])
-        tf_example.features.feature['abstract'].bytes_list.value.extend([''])
-        tf_example_str = tf_example.SerializeToString()
-        data[article_id] = tf_example_str
-
-    with open(out_file, 'wb') as f:
-        for tf_example_str in data:
-            str_len = len(tf_example_str)
-            f.write(struct.pack('q', str_len))
-            f.write(struct.pack('%ds' % str_len, tf_example_str))
-
 
 def get_cable_results(data_file, out_file):
     out = open(out_file, 'w')

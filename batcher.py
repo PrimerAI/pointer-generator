@@ -61,7 +61,7 @@ class Example(object):
             data.article2ids(article_words, vocab)
         )
 
-        # Get a verison of the reference summary where in-article OOVs are represented by their
+        # Get a version of the reference summary where in-article OOVs are represented by their
         # temporary article OOV id
         abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
         # Set decoder target sequence that uses the temp article OOV ids
