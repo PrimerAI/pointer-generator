@@ -1,4 +1,6 @@
-"""This file contains code to run beam search decoding"""
+"""
+This file contains code to run beam search decoding.
+"""
 
 import numpy as np
 import os

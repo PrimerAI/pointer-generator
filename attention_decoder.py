@@ -1,5 +1,5 @@
 """
-This file defines the decoder
+This file defines the decoder.
 """
 
 import tensorflow as tf

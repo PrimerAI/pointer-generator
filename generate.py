@@ -1,7 +1,10 @@
+"""
+Library method to summarize given text.
+"""
 import os
 
 
-_model_dir = 'saved_model'
+_model_dir = 'saved_model_people'
 _vocab_path = os.path.join(_model_dir, 'vocab')
 _vocab_size = 20000
 _beam_size = 4
@@ -73,7 +76,7 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
         _load_model()
 
     # Handle short inputs
-    article_tokens, orig_article_tokens = process_article(spacy_article)
+    article_tokens, _, orig_article_tokens = process_article(spacy_article)
     if len(article_tokens) <= ideal_summary_length_tokens:
         return spacy_article.text
     min_summary_length = min(10 + len(article_tokens) / 10, 2 * ideal_summary_length_tokens / 3)

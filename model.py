@@ -449,10 +449,10 @@ class SummarizationModel(object):
         if hps.people_loss_wt:
             # Calculate people losses
             correct_people_loss = _mask_and_avg(
-                loss_per_step, self._padding_mask_people
+                loss_per_step, self._padding_mask_people, equal_wt_per_ex=False
             )
             other_people_loss = _mask_and_avg(
-                incorrect_people_loss_per_step, self._padding_mask_people
+                incorrect_people_loss_per_step, self._padding_mask_people, equal_wt_per_ex=False
             )
             people_loss = .1 * correct_people_loss - .1 * other_people_loss
             tf.summary.scalar('people_loss', people_loss)
@@ -545,7 +545,7 @@ class SummarizationModel(object):
                 # vocab_scores is the vocabulary distribution before applying softmax. Each entry
                 # on the list corresponds to one decoder step
                 vocab_scores = []
-                for i,output in enumerate(decoder_outputs):
+                for i, output in enumerate(decoder_outputs):
                     if i > 0:
                         tf.get_variable_scope().reuse_variables()
                     # apply the linear layer
@@ -865,7 +865,7 @@ class SummarizationModel(object):
         return results['ids'], results['probs'], new_states, attn_dists, p_gens, new_coverage
 
 
-def _mask_and_avg(values, padding_mask):
+def _mask_and_avg(values, padding_mask, equal_wt_per_ex=True):
     """
     Applies mask to values then returns overall average (a scalar).
   
@@ -876,12 +876,17 @@ def _mask_and_avg(values, padding_mask):
     returns:
         a scalar
     """
-    # shape batch_size. float32
-    dec_lens = tf.reduce_sum(padding_mask, axis=1)
     values_per_step = [v * padding_mask[:, dec_step] for dec_step, v in enumerate(values)]
-    # shape (batch_size); normalized value for each batch member
-    values_per_ex = sum(values_per_step) / tf.maximum(1., dec_lens)
-    return tf.reduce_mean(values_per_ex)
+    if equal_wt_per_ex:
+        # shape batch_size. float32
+        dec_lens = tf.reduce_sum(padding_mask, axis=1)
+        # shape (batch_size); normalized value for each batch member
+        values_per_ex = sum(values_per_step) / tf.maximum(1., dec_lens)
+        return tf.reduce_mean(values_per_ex)
+    else:
+        total = tf.reduce_sum(sum(values_per_step))
+        total_weight = tf.reduce_sum(padding_mask)
+        return total / total_weight
 
 
 def _coverage_loss(attn_dists, padding_mask):

@@ -1,5 +1,5 @@
 """
-This is the top-level file to train, evaluate or test your summarization model
+This is the top-level file to train, evaluate or test your summarization model.
 """
 
 import time
@@ -52,24 +52,25 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-c
 tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
 tf.app.flags.DEFINE_float('people_loss_wt', 0., 'If set, will add a loss for people tokens.')
 
+# Runtime configurations
 tf.app.flags.DEFINE_boolean('convert_matmul', False, 'Convert to saved matmul model ')
 tf.app.flags.DEFINE_boolean('save_matmul', False, 'Use matmul model.')
 
 
 def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay):
     """
-    Calculate the running average loss via exponential decay.
-    This is used to implement early stopping w.r.t. a more smooth loss curve than the raw loss curve.
+    Calculate the running average loss via exponential decay. This is used to implement early
+    stopping w.r.t. a more smooth loss curve than the raw loss curve.
   
     Args:
-      loss: loss on the most recent eval step
-      running_avg_loss: running_avg_loss so far
-      summary_writer: FileWriter object to write for tensorboard
-      step: training iteration step
-      decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
+        loss: loss on the most recent eval step
+        running_avg_loss: running_avg_loss so far
+        summary_writer: FileWriter object to write for tensorboard
+        step: training iteration step
+        decay: rate of exponential decay, a float between 0 and 1. Larger is smoother.
   
     Returns:
-      running_avg_loss: new running average loss
+        running_avg_loss: new running average loss
     """
     if running_avg_loss == 0:  # on the first iteration just take the loss
         running_avg_loss = loss
@@ -86,7 +87,7 @@ def calc_running_avg_loss(loss, running_avg_loss, summary_writer, step, decay):
 
 def convert_matmul_model(hps, vocab_size):
     """
-    Load checkpoint, add the full output project matrix , and save to checkpoint.
+    Load checkpoint, compute the full output project matrix, and save to checkpoint.
     """
     tf.logging.info("converting model to have fixed w_full")
 
@@ -165,7 +166,9 @@ def convert_to_coverage_model():
 
 
 def setup_training(model, batcher, hps, vocab_size):
-    """Does setup before starting training (run_training)"""
+    """
+    Does setup before starting training (run_training).
+    """
     train_dir = os.path.join(FLAGS.log_root, "train")
     if not os.path.exists(train_dir): os.makedirs(train_dir)
 
@@ -173,7 +176,10 @@ def setup_training(model, batcher, hps, vocab_size):
     with default_device:
         model.build_graph() # build the graph
         if FLAGS.convert_to_coverage_model:
-            assert FLAGS.coverage, "To convert your non-coverage model to a coverage model, run with convert_to_coverage_model=True and coverage=True"
+            assert FLAGS.coverage, (
+                "To convert your non-coverage model to a coverage model, run with "
+                "convert_to_coverage_model=True and coverage=True"
+            )
             convert_to_coverage_model()
         if FLAGS.convert_matmul:
             assert FLAGS.save_matmul
@@ -193,7 +199,8 @@ def setup_training(model, batcher, hps, vocab_size):
     sess_context_manager = sv.prepare_or_wait_for_session(config=util.get_config())
     tf.logging.info("Created session.")
     try:
-        run_training(model, batcher, sess_context_manager, sv, summary_writer) # this is an infinite loop until interrupted
+        # this is an infinite loop until interrupted
+        run_training(model, batcher, sess_context_manager, sv, summary_writer)
     except KeyboardInterrupt:
         tf.logging.info("Caught keyboard interrupt on worker. Stopping supervisor...")
         sv.stop()
@@ -201,7 +208,7 @@ def setup_training(model, batcher, hps, vocab_size):
 
 def run_training(model, batcher, sess_context_manager, sv, summary_writer):
     """
-    Repeatedly runs training iterations, logging loss to screen and writing summaries
+    Repeatedly runs training iterations, logging loss to screen and writing summaries.
     """
     tf.logging.info("starting run_training")
     with sess_context_manager as sess:
@@ -267,13 +274,22 @@ def run_eval(model, batcher, vocab, seconds_per_eval=20):
 
         # calculate running avg loss
         decay = max(.9, min(.99, 1. - seconds_per_eval / 600.))
-        running_avg_loss = calc_running_avg_loss(np.asscalar(loss), running_avg_loss, summary_writer, train_step, decay)
+        running_avg_loss = calc_running_avg_loss(
+            np.asscalar(loss), running_avg_loss, summary_writer, train_step, decay
+        )
 
         # If running_avg_loss is best so far, save this checkpoint (early stopping).
         # These checkpoints will appear as bestmodel-<iteration_number> in the eval dir
         if best_loss is None or running_avg_loss < best_loss:
-            tf.logging.info('Found new best model with %.3f running_avg_loss. Saving to %s', running_avg_loss, bestmodel_save_path)
-            saver.save(sess, bestmodel_save_path, global_step=train_step, latest_filename='checkpoint_best')
+            tf.logging.info(
+                'Found new best model with %.3f running_avg_loss. Saving to %s',
+                running_avg_loss,
+                bestmodel_save_path,
+            )
+            saver.save(
+                sess, bestmodel_save_path, global_step=train_step,
+                latest_filename='checkpoint_best',
+            )
             best_loss = running_avg_loss
 
         summary_writer.flush()
@@ -294,14 +310,17 @@ def main(unused_argv):
         if FLAGS.mode=="train":
             os.makedirs(FLAGS.log_root)
         else:
-            raise Exception("Logdir %s doesn't exist. Run in train mode to create it." % (FLAGS.log_root))
+            raise Exception(
+                "Logdir %s doesn't exist. Run in train mode to create it." % (FLAGS.log_root)
+            )
 
     vocab_size = 50000 if FLAGS.restrictive_embeddings else 20000
     vocab = Vocab(FLAGS.vocab_path, vocab_size) # create a vocabulary
 
     # If in decode mode, set batch_size = beam_size
     # Reason: in decode mode, we decode one example at a time.
-    # On each step, we have beam_size-many hypotheses in the beam, so we need to make a batch of these hypotheses.
+    # On each step, we have beam_size-many hypotheses in the beam, so we need to make a batch
+    # of these hypotheses.
     if FLAGS.mode == 'decode':
         FLAGS.batch_size = FLAGS.beam_size
 
@@ -337,10 +356,14 @@ def main(unused_argv):
         model = SummarizationModel(settings, hps, vocab)
         run_eval(model, batcher, vocab)
     elif hps.mode == 'decode':
-        decode_model_hps = hps._replace(max_dec_steps=1) # The model is configured with max_dec_steps=1 because we only ever run one step of the decoder at a time (to do beam search). Note that the batcher is initialized with max_dec_steps equal to e.g. 100 because the batches need to contain the full summaries
+        # The model is configured with max_dec_steps=1 because we only ever run one step of the
+        # decoder at a time (to do beam search). Note that the batcher is initialized with
+        # max_dec_steps equal to e.g. 100 because the batches need to contain the full summaries.
+        decode_model_hps = hps._replace(max_dec_steps=1)
         model = SummarizationModel(settings, decode_model_hps, vocab)
         decoder = BeamSearchDecoder(model, batcher, vocab)
-        decoder.decode() # decode indefinitely (unless single_pass=True, in which case deocde the dataset exactly once)
+        # decode indefinitely (unless single_pass=True, in which case decode the dataset exactly once)
+        decoder.decode()
     else:
         raise ValueError("The 'mode' flag must be one of train/eval/decode")
 

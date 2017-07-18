@@ -381,8 +381,8 @@ if __name__ == '__main__':
     #compute_reduced_embeddings_original_vocab(
     #    sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
     #)
-    #write_results(sys.argv[1])
+    write_results(sys.argv[1])
     #find_articles()
     #generate_input_file(sys.argv[1])
     #get_cable_results(sys.argv[1], sys.argv[2])
-    print_results()
+    #print_results()

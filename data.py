@@ -1,6 +1,6 @@
 """
 This file contains code to read the train/eval/test data from file and process it, and read the
-vocab data from file and process it
+vocab data from file and process it.
 """
 
 import csv

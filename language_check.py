@@ -1,3 +1,7 @@
+"""
+Basic checks for valid text using some simple rules.
+"""
+
 
 _articles_and_prepositions = {
     # articles
