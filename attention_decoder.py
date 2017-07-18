@@ -79,7 +79,8 @@ def attention_decoder(
             with variable_scope.variable_scope("coverage"):
                 w_c = variable_scope.get_variable("w_c", [1, 1, 1, attention_vec_size])
 
-        if prev_coverage is not None: # for beam search mode with coverage
+        if prev_coverage is not None:
+            # for beam search mode with coverage
             # reshape from (batch_size, attn_length) to (batch_size, attn_len, 1, 1)
             prev_coverage = tf.expand_dims(tf.expand_dims(prev_coverage,2),3)
 

@@ -340,7 +340,7 @@ class SummarizationModel(object):
         """
         Add the embedding layer, depending upon whether we want to initialize them with pretrained
         embeddings and whether to restrict the embedding layer to a linear transform of the
-        pretrained embebdings.
+        pretrained embeddings.
         """
         hps = self._hps
         vsize = self._vocab.size
@@ -471,6 +471,8 @@ class SummarizationModel(object):
                 self._loss + self._people_loss + hps.cov_loss_wt * self._coverage_loss
             )
             tf.summary.scalar('total_loss', self._total_loss)
+        else:
+            self._total_loss = self._loss + self._people_loss
 
 
     def _add_seq2seq(self):
@@ -487,7 +489,7 @@ class SummarizationModel(object):
             )
             self.trunc_norm_init = tf.truncated_normal_initializer(stddev=hps.trunc_norm_init_std)
 
-            # Add embedding matrix (shared by the encoder and decoder inputs)
+            # Add embedding matrix (shared by the encoder and decoder inputs).
             with tf.variable_scope('embedding'):
                 embedding = self._add_embeddings()
 
@@ -510,7 +512,7 @@ class SummarizationModel(object):
 
             # Our encoder is bidirectional and our decoder is unidirectional so we need to reduce
             # the final encoder hidden state to the right size to be the initial decoder hidden
-            # state
+            # state.
             self._dec_in_state = self._reduce_states(fw_st, bw_st)
 
             # Add the decoder.
@@ -563,15 +565,15 @@ class SummarizationModel(object):
                     self._add_loss(log_dists)
 
         if hps.mode == "decode":
-            # We run decode beam search mode one decoder step at a time
-            # log_dists is a singleton list containing shape (batch_size, extended_vsize)
+            # We run decode beam search mode one decoder step at a time.
+            # log_dists is a singleton list containing shape (batch_size, extended_vsize).
             assert len(log_dists) == 1
             log_dists = log_dists[0]
             # note batch_size = beam_size in decode mode
             self._topk_log_probs, self._topk_ids = tf.nn.top_k(log_dists, hps.batch_size*2)
         else:
             # Used to get output words to be fed back for training
-            # shape [max_dec_steps, batch_size, 4]
+            # shape [max_dec_steps, batch_size, 4].
             self._topk_log_probs, self._topk_ids = tf.nn.top_k(log_dists, 4)
 
 
@@ -580,13 +582,9 @@ class SummarizationModel(object):
         Sets self._train_op, the op to run for training.
         """
         # Take gradients of the trainable variables w.r.t. the loss function to minimize
-        if self._hps.coverage:
-            loss_to_minimize = self._total_loss
-        else:
-            loss_to_minimize = self._loss + self._people_loss
         tvars = tf.trainable_variables()
         gradients = tf.gradients(
-            loss_to_minimize, tvars, aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE
+            self._total_loss, tvars, aggregation_method=tf.AggregationMethod.EXPERIMENTAL_TREE
         )
 
         # Clip the gradients
@@ -703,6 +701,7 @@ class SummarizationModel(object):
         }
         if self._hps.coverage:
             to_return['coverage_loss'] = self._coverage_loss
+            to_return['attn_dists'] = self.attn_dists
         if get_outputs:
             to_return['top_k_ids'] = self._topk_ids
             to_return['top_k_log_probs'] = self._topk_log_probs
@@ -740,15 +739,15 @@ class SummarizationModel(object):
                 [batch_size, <=max_enc_steps, 2*enc_hidden_dim].
             dec_in_state: A LSTMStateTuple of shape ([1, dec_hidden_dim],[1, dec_hidden_dim])
         """
-        # feed the batch into the placeholders
+        # Feed the batch into the placeholders
         feed_dict = self._make_feed_dict(batch, just_enc=True)
-        # run the encoder
+        # Run the encoder
         enc_states, dec_in_state, global_step = sess.run(
             [self._enc_states, self._dec_in_state, self.global_step], feed_dict
         )
 
         # dec_in_state is LSTMStateTuple shape
-        # ([batch_size, dec_hidden_dim],[batch_size, dec_hidden_dim]).
+        # ([batch_size, dec_hidden_dim], [batch_size, dec_hidden_dim]).
         # Given that the batch is a single example repeated, dec_in_state is identical across the
         # batch so we just take the top row.
         dec_in_state = tf.contrib.rnn.LSTMStateTuple(dec_in_state.c[0], dec_in_state.h[0])
@@ -797,7 +796,7 @@ class SummarizationModel(object):
         beam_size = len(dec_init_states)
 
         # Turn dec_init_states (a list of LSTMStateTuples) into a single LSTMStateTuple for the
-        # batch
+        # batch.
         cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
         hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
         new_c = np.concatenate(cells, axis=0)  # shape [batch_size, dec_hidden_dim]
@@ -824,7 +823,7 @@ class SummarizationModel(object):
             feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
             to_return['coverage'] = self.coverage
 
-        # run the decoder step
+        # Run the decoder step
         if self._settings.trace_path:
             options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
             run_metadata = tf.RunMetadata()
@@ -838,25 +837,25 @@ class SummarizationModel(object):
         else:
             results = sess.run(to_return, feed_dict=feed)
 
-        # convert results['states'] (a single lstmstatetuple) into a list of lstmstatetuple,
-        # one for each hypothesis
+        # Convert results['states'] (a single lstmstatetuple) into a list of lstmstatetuple,
+        # one for each hypothesis.
         new_states = [
             tf.contrib.rnn.LSTMStateTuple(results['states'].c[i, :], results['states'].h[i, :])
             for i in xrange(beam_size)
         ]
 
-        # convert singleton list containing a tensor to a list of k arrays
+        # Convert singleton list containing a tensor to a list of k arrays.
         assert len(results['attn_dists'])==1
         attn_dists = results['attn_dists'][0].tolist()
 
-        # convert singleton list containing a tensor to a list of k arrays
+        # Convert singleton list containing a tensor to a list of k arrays.
         assert len(results['p_gens']) == 1
         p_gens = results['p_gens'][0].tolist()
         assert all(len(gen_list) == 1 for gen_list in p_gens)
         p_gens = [gen_list[0] for gen_list in p_gens]
 
-        # convert the coverage tensor to a list length k containing the coverage vector for each
-        # hypothesis
+        # Convert the coverage tensor to a list length k containing the coverage vector for each
+        # hypothesis.
         if self._hps.coverage:
             new_coverage = results['coverage'].tolist()
             assert len(new_coverage) == beam_size
@@ -899,7 +898,7 @@ def _coverage_loss(attn_dists, padding_mask):
     """
     # shape (batch_size, attn_length). initial coverage is zero.
     coverage = tf.zeros_like(attn_dists[0])
-    # coverage loss per decoder timestep. will be list length max_dec_steps containing shape
+    # Coverage loss per decoder timestep. Will be list length max_dec_steps containing shape
     # (batch_size).
     covlosses = []
 
