@@ -133,7 +133,7 @@ class Hypothesis(object):
         for i, (index_weight, log_prob, attn_dist, p_gen) in enumerate(zip(
             index_weights, log_probs, self.attn_dists, self.p_gens
         )):
-            max_attn = max(self.attn_dists)
+            max_attn = max(attn_dist)
             additional_log_prob_weight = index_weight * (1. - max_attn)
             log_probs[i] *= 1. + additional_log_prob_weight
             additional_attn_weight = index_weight * 2. * max(0., .5 - p_gen)
