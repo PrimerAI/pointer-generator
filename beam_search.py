@@ -124,10 +124,25 @@ class Hypothesis(object):
 
         # Discourage using pronouns
         pronoun_score = sum(float(token in key_token_ids['pronouns']) for token in self.tokens)
-        log_probs = np.array(self.log_probs)
+
+        index_weights = [1., .9, .7]
+        log_probs = np.array(self.log_probs[1:])
+        weights = np.ones_like(log_probs)
+
+        assert len(set(len(array) for array in (log_probs, weights, self.attn_dists, self.p_gens))) == 1
+        for i, (index_weight, log_prob, attn_dist, p_gen) in enumerate(zip(
+            index_weights, log_probs, self.attn_dists, self.p_gens
+        )):
+            max_attn = max(self.attn_dists)
+            additional_log_prob_weight = index_weight * (1. - max_attn)
+            log_probs[i] *= 1. + additional_log_prob_weight
+            additional_attn_weight = index_weight * 2. * max(0., .5 - p_gen)
+            log_probs[i] += additional_attn_weight * max_attn
+
+            weights[i] += additional_log_prob_weight + additional_attn_weight
 
         # Save computed score
-        self._scores[is_complete] = log_probs.mean() - pronoun_score
+        self._scores[is_complete] = weights.dot(log_probs) / weights.sum() - pronoun_score
         return self._scores[is_complete]
 
 
@@ -268,7 +283,8 @@ def run_beam_search(
 
     # Return the hypothesis with highest average log prob
     best_hyp = hyps_sorted[0]
-    return best_hyp, best_hyp.score(vocab.size, key_token_ids, is_complete=True)
+    score = best_hyp.score(vocab.size, key_token_ids, is_complete=True)
+    return best_hyp, score
 
 
 def sort_hyps(hyps, vocab_size, key_token_ids, complete_hyps):
@@ -278,7 +294,7 @@ def sort_hyps(hyps, vocab_size, key_token_ids, complete_hyps):
     return sorted(
         hyps,
         key=lambda h: h.score(vocab_size, key_token_ids, complete_hyps),
-        reverse=True
+        reverse=True,
     )
 
 

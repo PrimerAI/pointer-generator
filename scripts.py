@@ -293,7 +293,8 @@ def write_results(out_file):
 
         # Generate seq-to-seq summary on the fly
         spacy_article = doc.spacy_text()
-        summaries.append(generate_summary(spacy_article))
+        seq_to_seq, hyp, score = generate_summary(spacy_article)
+        summaries.append(seq_to_seq)
 
         # Print all results together
         for i, summ in enumerate(summaries):
@@ -301,7 +302,7 @@ def write_results(out_file):
                 summ = summ.encode('utf-8')
             out.write(summ.replace('\t', ' ').replace('\n', ' '))
             if i == len(summaries) - 1:
-                out.write('\n')
+                out.write('\t%f\n' % score)
             else:
                 out.write('\t')
 
@@ -350,11 +351,16 @@ def print_results():
         print generate_summary(spacy_article)
 
 
+######################################################
+# Generate sample summaries
+######################################################
+
+
 if __name__ == '__main__':
-    #compute_reduced_embeddings_original_vocab(
-    #    sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
-    #)
-    write_results(sys.argv[1])
+    compute_reduced_embeddings_original_vocab(
+        sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
+    )
+    #write_results(sys.argv[1])
     #find_articles()
     #generate_input_file(sys.argv[1])
     #get_cable_results(sys.argv[1], sys.argv[2])

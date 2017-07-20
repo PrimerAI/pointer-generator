@@ -67,6 +67,11 @@ def _load_model():
 
 
 def generate_summary(spacy_article, ideal_summary_length_tokens=60):
+    """
+    Input: spacy-processed text. Should be the output of doc.spacy_text().
+    
+    Output: unicode summary of the text and scalar score of its quality.
+    """
     # These imports are slow - lazy import.
     from batcher import Batch, Example
     from beam_search import run_beam_search
@@ -87,10 +92,10 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
     batch = Batch([example] * _beam_size, _hps, _vocab)
 
     # Generate output
-    best_hyp, best_score = run_beam_search(
+    hyp, score = run_beam_search(
         _sess, _model, _vocab, batch, _beam_size, max_summary_length, min_summary_length
     )
 
     # Extract the output ids from the hypothesis and convert back to words
-    return process_output(best_hyp.token_strings[1:], orig_article_tokens)
+    return process_output(hyp.token_strings[1:], orig_article_tokens), hyp, score
 

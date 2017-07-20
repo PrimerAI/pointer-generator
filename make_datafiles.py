@@ -14,12 +14,12 @@ from io_processing import process_article
 from primer_core.nlp.get_spacy import get_spacy
 from pygov.analytic_pipeline.document_pipeline import SingleDocument
 
-dm_single_close_quote = u'\u2019'
-dm_double_close_quote = u'\u201d'
 # acceptable ways to end a sentence
-END_TOKENS = [
-    '.', '!', '?', '...', "'", "`", '"', dm_single_close_quote, dm_double_close_quote, ")"
-]
+REQUIRED_END_MARKERS = ('.', '!', '?')
+OTHER_END_MARKERS = ("'", "`", '"', u'\u2019', u'\u201d', ")")
+END_TOKENS = REQUIRED_END_MARKERS + tuple(
+    rem + oem for rem in REQUIRED_END_MARKERS for oem in OTHER_END_MARKERS
+)
 
 # These are the number of .story files we expect there to be in cnn_stories_dir and dm_stories_dir
 num_expected_cnn_stories = 92579
@@ -66,13 +66,12 @@ def chunk_all(finished_files_dir):
     print "Saved chunked data in %s" % chunks_dir
 
 
-def tokenize_stories(stories_dir, tokenized_stories_dir, is_cable):
+def tokenize_stories(stories_dir, tokenized_stories_dir, is_cable, n_workers):
     """
     Maps a whole directory of .story files to a tokenized version using spacy.
     """
     print "Preparing to tokenize %s to %s..." % (stories_dir, tokenized_stories_dir)
     tasks = multiprocessing.JoinableQueue()
-    n_workers = multiprocessing.cpu_count()
     print 'Creating %d workers' % n_workers
 
     for i in range(n_workers):
@@ -180,7 +179,8 @@ def fix_missing_period(line):
         return line
     if line == "":
         return line
-    if line[-1] in END_TOKENS:
+    unicode_line = unicode(line, 'utf-8')
+    if any(unicode_line.endswith(token) for token in END_TOKENS):
         return line
     return line + "."
 
@@ -206,8 +206,9 @@ def get_art_abs_canonical(story_file, add_periods):
     article_lines = []
     highlights = []
     next_is_highlight = False
+
     for idx, line in enumerate(lines):
-        if line == "":
+        if not line:
             continue
         elif line.startswith("@highlight"):
             next_is_highlight = True
@@ -326,13 +327,14 @@ def check_num_stories(stories_dir, num_expected):
 
 
 def main():
-    if len(sys.argv) != 3:
-        print "USAGE: python make_datafiles.py <raw_stories_dir> <output_dir>"
+    if len(sys.argv) != 4:
+        print "USAGE: python make_datafiles.py <raw_stories_dir> <output_dir> <n_workers>"
         sys.exit()
 
     # Define input / output directories
     raw_stories_dir = sys.argv[1]
     output_dir = sys.argv[2]
+    n_workers = int(sys.argv[3])
 
     cnn_stories_dir = os.path.join(raw_stories_dir, 'cnn')
     dm_stories_dir = os.path.join(raw_stories_dir, 'dailymail')
@@ -356,9 +358,9 @@ def main():
     check_num_stories(cables_stories_dir, num_expected_new_cables)
 
     # Run stanford tokenizer on both stories dirs, outputting to tokenized stories directories
-    tokenize_stories(dm_stories_dir, dm_tokenized_stories_dir, is_cable=False)
-    tokenize_stories(cnn_stories_dir, cnn_tokenized_stories_dir, is_cable=False)
-    tokenize_stories(cables_stories_dir, cables_tokenized_stories_dir, is_cable=True)
+    tokenize_stories(cnn_stories_dir, cnn_tokenized_stories_dir, is_cable=False, n_workers=n_workers)
+    tokenize_stories(dm_stories_dir, dm_tokenized_stories_dir, is_cable=False, n_workers=n_workers)
+    tokenize_stories(cables_stories_dir, cables_tokenized_stories_dir, is_cable=True, n_workers=n_workers)
 
     # Read the tokenized stories, do a little postprocessing then write to bin files
     write_to_bin(
