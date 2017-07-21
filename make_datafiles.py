@@ -229,7 +229,7 @@ def get_art_abs_cable(story_file):
     assert len(lines) == 1
 
     summary_match = re.search(
-        r'(summary(\s*and\s*comment)?[:.]?\s*)(.*)(end\s*summary(\s*and\s*comment)?\.?\s*)',
+        r'(summary(\s*and.*?[:\.])?[:\.]?\s*)(.*)(end\s*summary(\s*and.*?\.)?\.?\s*)',
         lines[0],
         flags=re.IGNORECASE | re.S,
     )
