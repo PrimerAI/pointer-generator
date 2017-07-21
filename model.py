@@ -524,12 +524,11 @@ class SummarizationModel(object):
 
             # Add the output projection to obtain the vocabulary distribution
             with tf.variable_scope('output_projection'):
-                effective_output_vocab_size = 3000
                 if self._hps.save_matmul:
-                    # Use precomputed projection matrix. Output vocab size is 3000.
+                    # Use precomputed projection matrix.
                     w_full = tf.get_variable(
-                        'w_full', [hps.dec_hidden_dim, effective_output_vocab_size],
-                        dtype=tf.float32, initializer=self.trunc_norm_init
+                        'w_full', [hps.dec_hidden_dim, vsize], dtype=tf.float32,
+                        initializer=self.trunc_norm_init
                     )
                 else:
                     # Projection matrix is a matrix product of our projection variable and the
@@ -538,15 +537,10 @@ class SummarizationModel(object):
                         'w', [hps.dec_hidden_dim, hps.emb_dim], dtype=tf.float32,
                         initializer=self.trunc_norm_init
                     )
-                    # Output vocab size is 3000.
-                    truncated_embeddings = tf.slice(
-                        embedding, [0, 0], [effective_output_vocab_size, hps.emb_dim]
-                    )
-                    w_full = tf.matmul(w, truncated_embeddings, transpose_b=True)
+                    w_full = tf.matmul(w, embedding, transpose_b=True)
 
                 v = tf.get_variable(
-                    'v', [effective_output_vocab_size], dtype=tf.float32,
-                    initializer=self.trunc_norm_init
+                    'v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init
                 )
                 # vocab_scores is the vocabulary distribution before applying softmax. Each entry
                 # on the list corresponds to one decoder step
@@ -556,10 +550,7 @@ class SummarizationModel(object):
                         tf.get_variable_scope().reuse_variables()
                     # apply the linear layer
                     gen_output = tf.nn.xw_plus_b(output, w_full, v)
-                    full_output = tf.pad(
-                        gen_output, [[0, 0], [0, vsize - effective_output_vocab_size]]
-                    )
-                    vocab_scores.append(full_output)
+                    vocab_scores.append(gen_output)
                 # The vocabulary distributions. List length max_dec_steps of (batch_size, vsize)
                 # arrays. The words are in the order they appear in the vocabulary file.
                 vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
