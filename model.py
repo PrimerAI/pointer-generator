@@ -36,6 +36,7 @@ Hps = namedtuple('Hyperparameters', (
     'max_enc_steps',
     'max_grad_norm',
     'mode',
+    'output_vocab_size',
     'people_loss_wt',
     'rand_unif_init_mag',
     'restrictive_embeddings',
@@ -264,8 +265,8 @@ class SummarizationModel(object):
         """
         with tf.variable_scope('final_distribution'):
             # Multiply vocab dists by p_gen and attention dists by (1-p_gen)
-            vocab_dists = [p_gen * dist for (p_gen,dist) in zip(self.p_gens, vocab_dists)]
-            attn_dists = [(1 - p_gen) * dist for (p_gen,dist) in zip(self.p_gens, attn_dists)]
+            vocab_dists = [p_gen * dist for (p_gen, dist) in zip(self.p_gens, vocab_dists)]
+            attn_dists = [(1 - p_gen) * dist for (p_gen, dist) in zip(self.p_gens, attn_dists)]
 
             # Concatenate some zeros to each vocabulary dist, to hold the probabilities for
             # in-article OOV words
@@ -524,10 +525,11 @@ class SummarizationModel(object):
 
             # Add the output projection to obtain the vocabulary distribution
             with tf.variable_scope('output_projection'):
+                output_vocab_size = hps.output_vocab_size or vsize
                 if self._hps.save_matmul:
                     # Use precomputed projection matrix.
                     w_full = tf.get_variable(
-                        'w_full', [hps.dec_hidden_dim, vsize], dtype=tf.float32,
+                        'w_full', [hps.dec_hidden_dim, output_vocab_size], dtype=tf.float32,
                         initializer=self.trunc_norm_init
                     )
                 else:
@@ -537,10 +539,13 @@ class SummarizationModel(object):
                         'w', [hps.dec_hidden_dim, hps.emb_dim], dtype=tf.float32,
                         initializer=self.trunc_norm_init
                     )
-                    w_full = tf.matmul(w, embedding, transpose_b=True)
+                    truncated_embedding = tf.slice(
+                        embedding, [0, 0], [output_vocab_size, hps.emb_dim]
+                    )
+                    w_full = tf.matmul(w, truncated_embedding, transpose_b=True)
 
                 v = tf.get_variable(
-                    'v', [vsize], dtype=tf.float32, initializer=self.trunc_norm_init
+                    'v', [output_vocab_size], dtype=tf.float32, initializer=self.trunc_norm_init
                 )
                 # vocab_scores is the vocabulary distribution before applying softmax. Each entry
                 # on the list corresponds to one decoder step
@@ -550,6 +555,10 @@ class SummarizationModel(object):
                         tf.get_variable_scope().reuse_variables()
                     # apply the linear layer
                     gen_output = tf.nn.xw_plus_b(output, w_full, v)
+                    if output_vocab_size < vsize:
+                        gen_output = tf.pad(
+                            gen_output, [[0, 0], [0, vsize - output_vocab_size]]
+                        )
                     vocab_scores.append(gen_output)
                 # The vocabulary distributions. List length max_dec_steps of (batch_size, vsize)
                 # arrays. The words are in the order they appear in the vocabulary file.

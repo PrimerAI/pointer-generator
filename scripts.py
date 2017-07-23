@@ -348,7 +348,7 @@ def print_results():
         doc = SingleDocument(0, raw={'body': article_text})
         spacy_article = doc.spacy_text()
         print '#################'
-        print generate_summary(spacy_article)
+        print generate_summary(spacy_article)[0]
 
 
 ######################################################
@@ -357,10 +357,10 @@ def print_results():
 
 
 if __name__ == '__main__':
-    compute_reduced_embeddings_original_vocab(
-        sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
-    )
-    #write_results(sys.argv[1])
+    #compute_reduced_embeddings_original_vocab(
+    #    sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
+    #)
+    write_results(sys.argv[1])
     #find_articles()
     #generate_input_file(sys.argv[1])
     #get_cable_results(sys.argv[1], sys.argv[2])

@@ -63,7 +63,10 @@ class Example(object):
 
         # Get a version of the reference summary where in-article OOVs are represented by their
         # temporary article OOV id
-        abs_ids_extend_vocab = data.abstract2ids(abstract_words, vocab, self.article_oovs)
+        abs_ids_extend_vocab = data.abstract2ids(
+            abstract_words, vocab, self.article_oovs, set([w for w, word_type in article_words]),
+            hps.output_vocab_size or vocab.size
+        )
         # Set decoder target sequence that uses the temp article OOV ids
         _, self.target = self.get_dec_inp_targ_seqs(
             abs_ids_extend_vocab, hps.max_dec_steps, start_decoding, stop_decoding

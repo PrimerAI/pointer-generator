@@ -117,33 +117,42 @@ class Hypothesis(object):
             # Score is already computed.
             return self._scores[is_complete]
 
+        total_score = 0.
+
         if self._is_early_malformed(vocab_size, key_token_ids['stop'], key_token_ids['comma']):
-            return -(10. ** 6)
+            total_score -= 10. ** 6
         if is_complete and language_check.has_poor_grammar(self.token_strings):
-            return -(10. ** 6)
+            total_score -= 10. ** 6
 
         # Discourage using pronouns
-        pronoun_score = sum(float(token in key_token_ids['pronouns']) for token in self.tokens)
+        total_score -= sum(float(token in key_token_ids['pronouns']) for token in self.tokens)
 
-        index_weights = [1., .9, .7]
+        # Compute log probabilities
         log_probs = np.array(self.log_probs[1:])
         weights = np.ones_like(log_probs)
 
         assert len(set(len(array) for array in (log_probs, weights, self.attn_dists, self.p_gens))) == 1
+        index_weights = [1., .9, .7]
+        # Weigh the first three tokens more.
         for i, (index_weight, log_prob, attn_dist, p_gen) in enumerate(zip(
             index_weights, log_probs, self.attn_dists, self.p_gens
         )):
             max_attn = max(attn_dist)
             additional_log_prob_weight = index_weight * (1. - max_attn)
             log_probs[i] *= 1. + additional_log_prob_weight
-            additional_attn_weight = index_weight * 2. * max(0., .5 - p_gen)
-            log_probs[i] += additional_attn_weight * max_attn
+            weights[i] += additional_log_prob_weight
 
-            weights[i] += additional_log_prob_weight + additional_attn_weight
+        prob_score = weights.dot(log_probs) / weights.sum()
+        total_score += prob_score
+
+        # Add to score for being abstractive.
+        total_score += .5 * np.mean([
+            p if st != '.' else 0. for p, st in zip(self.p_gens, self.token_strings[1:])
+        ])
 
         # Save computed score
-        self._scores[is_complete] = weights.dot(log_probs) / weights.sum() - pronoun_score
-        return self._scores[is_complete]
+        self._scores[is_complete] = total_score
+        return total_score
 
 
 def get_key_token_ids(vocab):

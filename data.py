@@ -66,6 +66,8 @@ POS_TOKENS = (
 UNKNOWN_TOKEN = '[UNK]'
 
 UNKNOWN_TOKENS = ENTITY_TOKENS + POS_TOKENS + (UNKNOWN_TOKEN,)
+
+N_IMPORTANT_TOKENS = len(ENTITY_TOKENS) + 3
 N_FREE_TOKENS = len(UNKNOWN_TOKENS) + 3
 
 
@@ -289,7 +291,7 @@ def article2ids(article_words, vocab):
     return ids, oovs, unk_article_id_to_word_id
 
 
-def abstract2ids(abstract_words, vocab, article_oovs):
+def abstract2ids(abstract_words, vocab, article_oovs, article_words, output_vocab_size):
     """
     Map the abstract words to their ids. In-article OOVs are mapped to their temporary OOV numbers.
   
@@ -301,6 +303,10 @@ def abstract2ids(abstract_words, vocab, article_oovs):
         article_oovs:
             list of in-article OOV words (strings), in the order corresponding to their
             temporary article OOV numbers
+        article_words:
+            set of all article words
+        output_vocab_size:
+            int representing number of words that can be generated
   
     Returns:
         ids:
@@ -309,6 +315,19 @@ def abstract2ids(abstract_words, vocab, article_oovs):
     """
     ids = []
     unk_ids = set(vocab.word2id('', token) for token in UNKNOWN_TOKENS)
+
+    def assign_non_entity_token(id_, w, word_type):
+        """
+        Assumes id_ is not an unk token.
+        """
+        if id_ < output_vocab_size:
+            # is a word that can be generated
+            return id_
+        if id_ in article_words:
+            # is a word that can be copied
+            return id_
+        # word cannot be produced, have it learn the word_type instead
+        return vocab.word2id('', word_type)
 
     for w, word_type in abstract_words:
         i = vocab.word2id(w, word_type)
@@ -324,9 +343,9 @@ def abstract2ids(abstract_words, vocab, article_oovs):
                     ids.append(i)
                 else:
                     # w is in vocabulary but labeled as entity. Map to actual word.
-                    ids.append(i_orig)
+                    ids.append(assign_non_entity_token(i_orig, w, word_type))
         else:
-            ids.append(i)
+            ids.append(assign_non_entity_token(i, w, word_type))
 
     return ids
 

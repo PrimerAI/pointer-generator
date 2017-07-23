@@ -23,6 +23,7 @@ tf.app.flags.DEFINE_string('embeddings_path', '', 'For the start of training, if
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
 tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a fixed checkpoint, i.e. take the current checkpoint, and use it to produce one summary for each example in the dataset, write the summaries to file and then get ROUGE scores for the whole dataset. If False (default), run concurrent decoding, i.e. repeatedly load latest checkpoint, use it to produce summaries for randomly-chosen examples and log the results to screen, indefinitely.')
 tf.app.flags.DEFINE_boolean('restrictive_embeddings', False, 'If True, then restricts word embeddings to be a linear transform of the pretrained embeddings.')
+tf.app.flags.DEFINE_integer('output_vocab_size', 0, 'If set, limits the size of the vocab for decoding.')
 
 # Where to save output
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
@@ -315,6 +316,7 @@ def main(unused_argv):
             )
 
     vocab_size = 50000 if FLAGS.restrictive_embeddings else 20000
+    assert FLAGS.output_vocab_size <= vocab_size
     vocab = Vocab(FLAGS.vocab_path, vocab_size) # create a vocabulary
 
     # If in decode mode, set batch_size = beam_size
