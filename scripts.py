@@ -229,7 +229,7 @@ def find_articles():
     for article_dir in RAW_ARTICLE_DIRS:
         for filename in os.listdir(article_dir):
             article_path = os.path.join(article_dir, filename)
-            article, abstract = get_art_abs(article_path, add_periods=True)
+            article, abstract = get_art_abs(article_path, add_periods=True, is_cable=False)
 
             article_words = article.lower().split()
             full_article_words = set(
@@ -360,8 +360,8 @@ if __name__ == '__main__':
     #compute_reduced_embeddings_original_vocab(
     #    sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
     #)
-    #write_results(sys.argv[1])
+    write_results(sys.argv[1])
     #find_articles()
     #generate_input_file(sys.argv[1])
     #get_cable_results(sys.argv[1], sys.argv[2])
-    print_results()
+    #print_results()

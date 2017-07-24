@@ -4,7 +4,7 @@ Library method to summarize given text.
 import os
 
 
-_model_dir = 'saved_model_combined_output'
+_model_dir = 'saved_models/combined'
 _vocab_path = os.path.join(_model_dir, 'vocab')
 _vocab_size = 20000
 _beam_size = 4
@@ -40,7 +40,7 @@ def _load_model():
         dec_hidden_dim=400,
         max_enc_steps=400,
         mode='decode',
-        output_vocab_size=1000,
+        output_vocab_size=20000,
         restrictive_embeddings=False,
         save_matmul=False,
         tied_output=True,

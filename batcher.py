@@ -163,6 +163,7 @@ class Batch(object):
             vocab: Vocabulary object
         """
         self.pad_id = vocab.word2id(data.PAD_TOKEN, None)
+        self.stop_id = vocab.word2id(data.STOP_DECODING, None)
         self.init_encoder_seq(example_list, hps)
         self.init_decoder_seq(example_list, hps)
         self.store_orig_strings(example_list)
@@ -261,8 +262,7 @@ class Batch(object):
             self.dec_batch[i, :] = ex.dec_input[:]
             self.target_batch[i, :] = ex.target[:]
             self.padding_mask_people[i, :] = ex.target_people[:]
-            for j in xrange(ex.dec_len):
-                self.padding_mask[i][j] = 1
+            self.padding_mask[i] = (ex.target >= data.N_FREE_TOKENS) | (ex.target == self.stop_id)
             self.people_ids[i, :len(ex.people_ids)] = ex.people_ids[:]
 
 
