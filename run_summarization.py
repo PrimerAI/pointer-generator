@@ -53,8 +53,9 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-c
 tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
 tf.app.flags.DEFINE_float('people_loss_wt', 0., 'If set, will add a loss for people tokens.')
 
-# Runtime configurations
-tf.app.flags.DEFINE_boolean('convert_matmul', False, 'Convert to saved matmul model ')
+# Output projection weights
+tf.app.flags.DEFINE_boolean('tied_output', True, 'Whether the output matrix is a multiple of the embeddings.')
+tf.app.flags.DEFINE_boolean('convert_matmul', False, 'Convert to saved matmul model.')
 tf.app.flags.DEFINE_boolean('save_matmul', False, 'Use matmul model.')
 
 

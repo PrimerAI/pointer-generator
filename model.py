@@ -41,6 +41,7 @@ Hps = namedtuple('Hyperparameters', (
     'rand_unif_init_mag',
     'restrictive_embeddings',
     'save_matmul',
+    'tied_output',
     'trunc_norm_init_std',
 ))
 
@@ -527,12 +528,13 @@ class SummarizationModel(object):
             with tf.variable_scope('output_projection'):
                 output_vocab_size = hps.output_vocab_size or vsize
                 if self._hps.save_matmul:
+                    assert self._hps.tied_output
                     # Use precomputed projection matrix.
                     w_full = tf.get_variable(
                         'w_full', [hps.dec_hidden_dim, output_vocab_size], dtype=tf.float32,
                         initializer=self.trunc_norm_init
                     )
-                else:
+                elif self._hps.tied_output:
                     # Projection matrix is a matrix product of our projection variable and the
                     # embeddings.
                     w = tf.get_variable(
@@ -543,6 +545,11 @@ class SummarizationModel(object):
                         embedding, [0, 0], [output_vocab_size, hps.emb_dim]
                     )
                     w_full = tf.matmul(w, truncated_embedding, transpose_b=True)
+                else:
+                    w_full = tf.get_variable(
+                        'w', [hps.dec_hidden_dim, output_vocab_size], dtype=tf.float32,
+                        initializer=self.trunc_norm_init
+                    )
 
                 v = tf.get_variable(
                     'v', [output_vocab_size], dtype=tf.float32, initializer=self.trunc_norm_init

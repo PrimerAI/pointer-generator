@@ -42,6 +42,7 @@ def _load_model():
         output_vocab_size=1000,
         restrictive_embeddings=False,
         save_matmul=False,
+        tied_output=True,
         # other parameters
         adagrad_init_acc=.1,
         adam_optimizer=True,
