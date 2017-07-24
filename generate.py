@@ -33,6 +33,7 @@ def _load_model():
     _hps = Hps(
         # parameters important for decoding
         batch_size=4,
+        copy_only_entities=False,
         coverage=False,
         emb_dim=128,
         enc_hidden_dim=256,

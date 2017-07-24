@@ -234,7 +234,7 @@ def example_generator(data_path, single_pass):
             break
 
 
-def article2ids(article_words, vocab):
+def article2ids(article_words, vocab, copy_only_entities):
     """
     Map the article words to their ids. Also return a list of OOVs in the article.
   
@@ -243,6 +243,8 @@ def article2ids(article_words, vocab):
             list of word (string, word_type) tuples
         vocab:
             Vocabulary object
+        copy_only_entities:
+            boolean for whether non-entities can be copied
   
     Returns:
         ids:
@@ -264,7 +266,7 @@ def article2ids(article_words, vocab):
 
     for index, (w, word_type) in enumerate(article_words):
         i = vocab.word2id(w, word_type)
-        if i in unk_ids:
+        if i in unk_ids and (not copy_only_entities or 3 <= i < N_IMPORTANT_TOKENS):
             if w not in oovs:
                 # Add to list of OOVs
                 oovs.append(w)
@@ -291,7 +293,7 @@ def article2ids(article_words, vocab):
     return ids, oovs, unk_article_id_to_word_id
 
 
-def abstract2ids(abstract_words, vocab, article_oovs, article_words, output_vocab_size):
+def abstract2ids(abstract_words, vocab, article_oovs, copyable_words, output_vocab_size):
     """
     Map the abstract words to their ids. In-article OOVs are mapped to their temporary OOV numbers.
   
@@ -303,8 +305,8 @@ def abstract2ids(abstract_words, vocab, article_oovs, article_words, output_voca
         article_oovs:
             list of in-article OOV words (strings), in the order corresponding to their
             temporary article OOV numbers
-        article_words:
-            set of all article words
+        copyable_words:
+            set of all article words that can be copied
         output_vocab_size:
             int representing number of words that can be generated
   
@@ -325,7 +327,7 @@ def abstract2ids(abstract_words, vocab, article_oovs, article_words, output_voca
         i_article_oov = vocab.size + article_oovs.index(w) if w in article_oovs else 0
         # index for part of speech
         i_pos = vocab.word2id('', word_type)
-        is_in_article = w in article_words
+        is_copyable = w in copyable_words
 
         if i_orig < output_vocab_size:
             # can be generated
@@ -339,16 +341,14 @@ def abstract2ids(abstract_words, vocab, article_oovs, article_words, output_voca
             if i_real in unk_ids and i_article_oov:
                 # labeled as an entity in both article and abstract
                 ids.append(i_article_oov)
-            elif is_in_article:
-                # can be copied
+            elif is_copyable:
                 ids.append(i_orig)
             else:
                 # can't be generated or copied, use POS
                 ids.append(i_pos)
         else:
             # out-of-vocab
-            if is_in_article:
-                # can be copied
+            if is_copyable:
                 assert i_article_oov
                 ids.append(i_article_oov)
             else:

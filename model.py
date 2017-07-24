@@ -12,7 +12,7 @@ from tensorflow.contrib.tensorboard.plugins import projector
 from tensorflow.python.client import timeline
 
 from attention_decoder import attention_decoder
-from data import N_FREE_TOKENS, START_DECODING
+from data import N_FREE_TOKENS, N_IMPORTANT_TOKENS, START_DECODING
 
 
 Settings = namedtuple('Settings', (
@@ -26,6 +26,7 @@ Hps = namedtuple('Hyperparameters', (
     'adagrad_init_acc',
     'adam_optimizer',
     'batch_size',
+    'copy_only_entities',
     'cov_loss_wt',
     'coverage',
     'dec_hidden_dim',
@@ -265,9 +266,17 @@ class SummarizationModel(object):
                 arrays.
         """
         with tf.variable_scope('final_distribution'):
-            # Multiply vocab dists by p_gen and attention dists by (1-p_gen)
+            # Multiply vocab dists by p_gen and attention dists by (1 - p_gen)
             vocab_dists = [p_gen * dist for (p_gen, dist) in zip(self.p_gens, vocab_dists)]
             attn_dists = [(1 - p_gen) * dist for (p_gen, dist) in zip(self.p_gens, attn_dists)]
+
+            if self._hps.copy_only_entities:
+                keep_copy = tf.logical_and(
+                    tf.greater_equal(self._enc_batch, 3),
+                    tf.less(self._enc_batch, N_IMPORTANT_TOKENS),
+                )
+                keep_copy = tf.to_float(keep_copy)
+                attn_dists = [keep_copy * dist for dist in attn_dists]
 
             # Concatenate some zeros to each vocabulary dist, to hold the probabilities for
             # in-article OOV words
@@ -654,7 +663,6 @@ class SummarizationModel(object):
             batch, get_outputs=use_generated_inputs
         )
         results = sess.run(to_return, feed_dict)
-
         if not use_generated_inputs:
             return results
 

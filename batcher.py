@@ -58,13 +58,17 @@ class Example(object):
         # Store a version of the enc_input where in-article OOVs are represented by their
         # temporary OOV id; also store the in-article OOVs words themselves
         self.enc_input_extend_vocab, self.article_oovs, self.article_id_to_word_id = (
-            data.article2ids(article_words, vocab)
+            data.article2ids(article_words, vocab, hps.copy_only_entities)
         )
 
         # Get a version of the reference summary where in-article OOVs are represented by their
         # temporary article OOV id
+        if hps.copy_only_entities:
+            copyable_words = set(self.article_oovs)
+        else:
+            copyable_words = set([w for w, word_type in article_words])
         abs_ids_extend_vocab = data.abstract2ids(
-            abstract_words, vocab, self.article_oovs, set([w for w, word_type in article_words]),
+            abstract_words, vocab, self.article_oovs, copyable_words,
             hps.output_vocab_size or vocab.size
         )
         # Set decoder target sequence that uses the temp article OOV ids
