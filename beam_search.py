@@ -146,7 +146,7 @@ class Hypothesis(object):
         total_score += prob_score
 
         # Add to score for being abstractive.
-        total_score += .5 * np.mean([
+        total_score += .25 * np.mean([
             p if st != '.' else 0. for p, st in zip(self.p_gens, self.token_strings[1:])
         ])
 

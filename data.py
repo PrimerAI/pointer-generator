@@ -316,36 +316,44 @@ def abstract2ids(abstract_words, vocab, article_oovs, article_words, output_voca
     ids = []
     unk_ids = set(vocab.word2id('', token) for token in UNKNOWN_TOKENS)
 
-    def assign_non_entity_token(id_, w, word_type):
-        """
-        Assumes id_ is not an unk token.
-        """
-        if id_ < output_vocab_size:
-            # is a word that can be generated
-            return id_
-        if id_ in article_words:
-            # is a word that can be copied
-            return id_
-        # word cannot be produced, have it learn the word_type instead
-        return vocab.word2id('', word_type)
-
     for w, word_type in abstract_words:
-        i = vocab.word2id(w, word_type)
-        if i in unk_ids:
-            if w in article_oovs:
-                # Map to its temporary article OOV number
-                vocab_idx = vocab.size + article_oovs.index(w)
-                ids.append(vocab_idx)
+        # index ignoring entity / POS tags
+        i_orig = vocab.word2id(w, None)
+        # index including entity / POS tags
+        i_real = vocab.word2id(w, word_type)
+        # index if word is in article oov or entity
+        i_article_oov = vocab.size + article_oovs.index(w) if w in article_oovs else 0
+        # index for part of speech
+        i_pos = vocab.word2id('', word_type)
+        is_in_article = w in article_words
+
+        if i_orig < output_vocab_size:
+            # can be generated
+            if i_real in unk_ids and i_article_oov:
+                # labeled as an entity in both article and abstract
+                ids.append(i_article_oov)
             else:
-                i_orig = vocab.word2id(w, None)
-                if i_orig in unk_ids:
-                    # w is an out-of-article OOV. Map to entity if possible.
-                    ids.append(i)
-                else:
-                    # w is in vocabulary but labeled as entity. Map to actual word.
-                    ids.append(assign_non_entity_token(i_orig, w, word_type))
+                ids.append(i_orig)
+        elif i_orig not in unk_ids:
+            # in vocab but cannot be generated
+            if i_real in unk_ids and i_article_oov:
+                # labeled as an entity in both article and abstract
+                ids.append(i_article_oov)
+            elif is_in_article:
+                # can be copied
+                ids.append(i_orig)
+            else:
+                # can't be generated or copied, use POS
+                ids.append(i_pos)
         else:
-            ids.append(assign_non_entity_token(i, w, word_type))
+            # out-of-vocab
+            if is_in_article:
+                # can be copied
+                assert i_article_oov
+                ids.append(i_article_oov)
+            else:
+                # can't be generated or copied, use POS
+                ids.append(i_pos)
 
     return ids
 
