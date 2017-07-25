@@ -125,12 +125,12 @@ class Hypothesis(object):
             total_score -= 10. ** 6
 
         # Discourage using pronouns
-        total_score -= sum(float(token in key_token_ids['pronouns']) for token in self.tokens)
+        total_score -= .05 * sum(float(token in key_token_ids['pronouns']) for token in self.tokens)
 
         # Compute log probabilities
         total_score += sum(self.log_probs[1:]) / (len(self.log_probs) - 1)
 
-        # Add to score for being abstractive.
+        # Abstractive tokens tend to have lower log probabilities, so compensate for that.
         total_score += .25 * np.mean([
             p if st != '.' else 0. for p, st in zip(self.p_gens, self.token_strings[1:])
         ])
@@ -146,12 +146,6 @@ def get_key_token_ids(vocab):
         'comma': vocab.word2id(',', None),
         'period': vocab.word2id('.', None),
         'pronouns': {vocab.word2id(word, None) for word in ('he', 'she', 'him', 'her')},
-        #'people': {vocab.word2id(word, None) for word in data.PERSON_TOKENS + ('[ORG]',)},
-        #'other_entities': {
-        #    vocab.word2id(word, None)
-        #    for word in data.ENTITY_TOKENS + ('[PROPN]',)
-        #    if word not in data.PERSON_TOKENS and word != '[ORG]'
-        #},
     }
 
 

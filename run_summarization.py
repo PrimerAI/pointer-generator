@@ -318,6 +318,8 @@ def main(unused_argv):
             )
 
     vocab_size = 50000 if FLAGS.restrictive_embeddings else 20000
+    if FLAGS.output_vocab_size == 0:
+        FLAGS.output_vocab_size = vocab_size
     assert FLAGS.output_vocab_size <= vocab_size
     vocab = Vocab(FLAGS.vocab_path, vocab_size) # create a vocabulary
 

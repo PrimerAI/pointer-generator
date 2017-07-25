@@ -535,15 +535,14 @@ class SummarizationModel(object):
 
             # Add the output projection to obtain the vocabulary distribution
             with tf.variable_scope('output_projection'):
-                output_vocab_size = hps.output_vocab_size or vsize
-                if self._hps.save_matmul:
-                    assert self._hps.tied_output
+                if hps.save_matmul:
+                    assert hps.tied_output
                     # Use precomputed projection matrix.
                     w_full = tf.get_variable(
-                        'w_full', [hps.dec_hidden_dim, output_vocab_size], dtype=tf.float32,
+                        'w_full', [hps.dec_hidden_dim, hps.output_vocab_size], dtype=tf.float32,
                         initializer=self.trunc_norm_init
                     )
-                elif self._hps.tied_output:
+                elif hps.tied_output:
                     # Projection matrix is a matrix product of our projection variable and the
                     # embeddings.
                     w = tf.get_variable(
@@ -551,17 +550,17 @@ class SummarizationModel(object):
                         initializer=self.trunc_norm_init
                     )
                     truncated_embedding = tf.slice(
-                        embedding, [0, 0], [output_vocab_size, hps.emb_dim]
+                        embedding, [0, 0], [hps.output_vocab_size, hps.emb_dim]
                     )
                     w_full = tf.matmul(w, truncated_embedding, transpose_b=True)
                 else:
                     w_full = tf.get_variable(
-                        'w', [hps.dec_hidden_dim, output_vocab_size], dtype=tf.float32,
+                        'w', [hps.dec_hidden_dim, hps.output_vocab_size], dtype=tf.float32,
                         initializer=self.trunc_norm_init
                     )
 
                 v = tf.get_variable(
-                    'v', [output_vocab_size], dtype=tf.float32, initializer=self.trunc_norm_init
+                    'v', [hps.output_vocab_size], dtype=tf.float32, initializer=self.trunc_norm_init
                 )
                 # vocab_scores is the vocabulary distribution before applying softmax. Each entry
                 # on the list corresponds to one decoder step
@@ -571,9 +570,9 @@ class SummarizationModel(object):
                         tf.get_variable_scope().reuse_variables()
                     # apply the linear layer
                     gen_output = tf.nn.xw_plus_b(output, w_full, v)
-                    if output_vocab_size < vsize:
+                    if hps.output_vocab_size < vsize:
                         gen_output = tf.pad(
-                            gen_output, [[0, 0], [0, vsize - output_vocab_size]]
+                            gen_output, [[0, 0], [0, vsize - hps.output_vocab_size]]
                         )
                     vocab_scores.append(gen_output)
                 # The vocabulary distributions. List length max_dec_steps of (batch_size, vsize)

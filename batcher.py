@@ -64,12 +64,12 @@ class Example(object):
         # Get a version of the reference summary where in-article OOVs are represented by their
         # temporary article OOV id
         if hps.copy_only_entities:
+            # article_oovs only has entities
             copyable_words = set(self.article_oovs)
         else:
             copyable_words = set([w for w, word_type in article_words])
         abs_ids_extend_vocab = data.abstract2ids(
-            abstract_words, vocab, self.article_oovs, copyable_words,
-            hps.output_vocab_size or vocab.size
+            abstract_words, vocab, self.article_oovs, copyable_words, hps.output_vocab_size
         )
         # Set decoder target sequence that uses the temp article OOV ids
         _, self.target = self.get_dec_inp_targ_seqs(
@@ -261,8 +261,11 @@ class Batch(object):
         for i, ex in enumerate(example_list):
             self.dec_batch[i, :] = ex.dec_input[:]
             self.target_batch[i, :] = ex.target[:]
+            self.padding_mask[i, :] = [
+                target >= data.N_FREE_TOKENS or target == self.stop_id
+                for target in ex.target
+            ]
             self.padding_mask_people[i, :] = ex.target_people[:]
-            self.padding_mask[i] = (ex.target >= data.N_FREE_TOKENS) | (ex.target == self.stop_id)
             self.people_ids[i, :len(ex.people_ids)] = ex.people_ids[:]
 
 
