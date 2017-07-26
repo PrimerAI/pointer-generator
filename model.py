@@ -352,6 +352,8 @@ class SummarizationModel(object):
         Add the embedding layer, depending upon whether we want to initialize them with pretrained
         embeddings and whether to restrict the embedding layer to a linear transform of the
         pretrained embeddings.
+        
+        Returns embedding variable of shape (vsize, emb_dim).
         """
         hps = self._hps
         vsize = self._vocab.size
@@ -486,12 +488,70 @@ class SummarizationModel(object):
             self._total_loss = self._loss + self._people_loss
 
 
+    def _add_projection(self, embedding, decoder_outputs):
+        """
+        Add the projection layer for the generated output distribution. Returns length
+        max_dec_steps list of distributions of shape (batch_size, vsize).
+        
+        Args:
+            embedding: variable of shape (vsize, emb_dim)
+            decoder_outputs: list of decoder outputs of shape (batch_size, input_size)
+        """
+        hps = self._hps
+        vsize = self._vocab.size
+
+        if hps.save_matmul:
+            assert hps.tied_output
+            # Use precomputed projection matrix.
+            w_full = tf.get_variable(
+                'w_full', [hps.dec_hidden_dim, hps.output_vocab_size], dtype=tf.float32,
+                initializer=self.trunc_norm_init
+            )
+        elif hps.tied_output:
+            # Projection matrix is a matrix product of our projection variable and the
+            # embeddings.
+            w = tf.get_variable(
+                'w', [hps.dec_hidden_dim, hps.emb_dim], dtype=tf.float32,
+                initializer=self.trunc_norm_init
+            )
+            truncated_embedding = tf.slice(
+                embedding, [0, 0], [hps.output_vocab_size, hps.emb_dim]
+            )
+            w_full = tf.matmul(w, truncated_embedding, transpose_b=True)
+        else:
+            w_full = tf.get_variable(
+                'w', [hps.dec_hidden_dim, hps.output_vocab_size], dtype=tf.float32,
+                initializer=self.trunc_norm_init
+            )
+
+        v = tf.get_variable(
+            'v', [hps.output_vocab_size], dtype=tf.float32, initializer=self.trunc_norm_init
+        )
+        # vocab_scores is the vocabulary distribution before applying softmax. Each entry
+        # on the list corresponds to one decoder step
+        vocab_scores = []
+        for i, output in enumerate(decoder_outputs):
+            if i > 0:
+                tf.get_variable_scope().reuse_variables()
+            # apply the linear layer
+            gen_output = tf.nn.xw_plus_b(output, w_full, v)
+            if hps.output_vocab_size < vsize:
+                gen_output = tf.pad(
+                    gen_output, [[0, 0], [0, vsize - hps.output_vocab_size]]
+                )
+            vocab_scores.append(gen_output)
+
+        # The vocabulary distributions. List length max_dec_steps of (batch_size, vsize)
+        # arrays. The words are in the order they appear in the vocabulary file.
+        vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
+        return vocab_dists
+
+
     def _add_seq2seq(self):
         """
         Add the whole sequence-to-sequence model to the graph.
         """
         hps = self._hps
-        vsize = self._vocab.size
 
         with tf.variable_scope('seq2seq'):
             # Some initializers
@@ -535,49 +595,7 @@ class SummarizationModel(object):
 
             # Add the output projection to obtain the vocabulary distribution
             with tf.variable_scope('output_projection'):
-                if hps.save_matmul:
-                    assert hps.tied_output
-                    # Use precomputed projection matrix.
-                    w_full = tf.get_variable(
-                        'w_full', [hps.dec_hidden_dim, hps.output_vocab_size], dtype=tf.float32,
-                        initializer=self.trunc_norm_init
-                    )
-                elif hps.tied_output:
-                    # Projection matrix is a matrix product of our projection variable and the
-                    # embeddings.
-                    w = tf.get_variable(
-                        'w', [hps.dec_hidden_dim, hps.emb_dim], dtype=tf.float32,
-                        initializer=self.trunc_norm_init
-                    )
-                    truncated_embedding = tf.slice(
-                        embedding, [0, 0], [hps.output_vocab_size, hps.emb_dim]
-                    )
-                    w_full = tf.matmul(w, truncated_embedding, transpose_b=True)
-                else:
-                    w_full = tf.get_variable(
-                        'w', [hps.dec_hidden_dim, hps.output_vocab_size], dtype=tf.float32,
-                        initializer=self.trunc_norm_init
-                    )
-
-                v = tf.get_variable(
-                    'v', [hps.output_vocab_size], dtype=tf.float32, initializer=self.trunc_norm_init
-                )
-                # vocab_scores is the vocabulary distribution before applying softmax. Each entry
-                # on the list corresponds to one decoder step
-                vocab_scores = []
-                for i, output in enumerate(decoder_outputs):
-                    if i > 0:
-                        tf.get_variable_scope().reuse_variables()
-                    # apply the linear layer
-                    gen_output = tf.nn.xw_plus_b(output, w_full, v)
-                    if hps.output_vocab_size < vsize:
-                        gen_output = tf.pad(
-                            gen_output, [[0, 0], [0, vsize - hps.output_vocab_size]]
-                        )
-                    vocab_scores.append(gen_output)
-                # The vocabulary distributions. List length max_dec_steps of (batch_size, vsize)
-                # arrays. The words are in the order they appear in the vocabulary file.
-                vocab_dists = [tf.nn.softmax(s) for s in vocab_scores]
+                vocab_dists = self._add_projection(embedding, decoder_outputs)
 
             # Calc final distribution from copy distribution and vocabulary distribution.
             final_dists = self._calc_final_dist(vocab_dists, self.attn_dists)
@@ -670,7 +688,7 @@ class SummarizationModel(object):
 
         # Run a second training step, where the inputs at each step can be either the real
         # labeled input or an input sampled from the output distribution of the model.
-        output_ids = self._get_decoded_output(batch, results)
+        output_ids = self._get_sampled_decoded_output(batch, results)
         feed_dict_generated, to_return_generated = self._get_train_step_feed_return(
             batch, get_outputs=False, output_ids=output_ids
         )
@@ -684,7 +702,7 @@ class SummarizationModel(object):
         return results
 
 
-    def _get_decoded_output(self, batch, results):
+    def _get_sampled_decoded_output(self, batch, results):
         """
         Only used during corrective training. Returns sampled output from the model
         (with probability .2) to be used as input for a second iteration of training on the same
