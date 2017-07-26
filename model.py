@@ -44,6 +44,7 @@ Hps = namedtuple('Hyperparameters', (
     'save_matmul',
     'tied_output',
     'trunc_norm_init_std',
+    'two_layer_encoder',
 ))
 
 
@@ -146,18 +147,44 @@ class SummarizationModel(object):
                 ([batch_size, enc_hidden_dim], [batch_size, enc_hidden_dim]).
         """
         with tf.variable_scope('encoder'):
-            cell_fw = tf.contrib.rnn.LSTMCell(
-                self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
-            )
-            cell_bw = tf.contrib.rnn.LSTMCell(
-                self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
-            )
+            if self._hps.two_layer_encoder:
+                cells_fw = [
+                    tf.contrib.rnn.LSTMCell(
+                        self._hps.enc_hidden_dim,
+                        initializer=self.rand_unif_init,
+                        state_is_tuple=True,
+                    )
+                    for i in range(2)
+                ]
+                cells_bw = [
+                    tf.contrib.rnn.LSTMCell(
+                        self._hps.enc_hidden_dim,
+                        initializer=self.rand_unif_init,
+                        state_is_tuple=True,
+                    )
+                    for i in range(2)
+                ]
+                cell_fw = tf.contrib.rnn.MultiRNNCell(cells_fw, state_is_tuple=True)
+                cell_bw = tf.contrib.rnn.MultiRNNCell(cells_bw, state_is_tuple=True)
+            else:
+                cell_fw = tf.contrib.rnn.LSTMCell(
+                    self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
+                )
+                cell_bw = tf.contrib.rnn.LSTMCell(
+                    self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
+                )
+
             encoder_outputs, (fw_st, bw_st) = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len,
                 swap_memory=True
             )
             # concatenate the forwards and backwards states
             encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
+            if self._hps.two_layer_encoder:
+                # Output states are tuples of final states at each level. Just take the top layer's
+                # output states.
+                fw_st = fw_st[1]
+                bw_st = bw_st[1]
 
         return encoder_outputs, fw_st, bw_st
 

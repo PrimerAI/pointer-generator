@@ -44,6 +44,7 @@ def _load_model():
         restrictive_embeddings=False,
         save_matmul=False,
         tied_output=True,
+        two_layer_encoder=False,
         # other parameters
         adagrad_init_acc=.1,
         adam_optimizer=True,
