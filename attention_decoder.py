@@ -19,7 +19,7 @@ def attention_decoder(
         decoder_inputs:
             A list of 2D Tensors [batch_size x input_size].
         initial_state:
-            2D Tensor [batch_size x cell.state_size].
+            2D Tensor [batch_size x cell.state_size]. If two layers, then tuple of such tensors.
         encoder_states:
             3D Tensor [batch_size x attn_length x attn_size].
         cell:
@@ -43,7 +43,8 @@ def attention_decoder(
             A list of the same length as decoder_inputs of 2D Tensors of shape
             [batch_size x cell.output_size]. The output vectors.
         state:
-            The final state of the decoder. A tensor shape [batch_size x cell.state_size].
+            The final state of the decoder. A tensor shape [batch_size x cell.state_size], or if
+            two layers, then a tuple of such tensors.
         attn_dists:
             A list containing tensors of shape (batch_size,attn_length). The attention
             distributions for each decoder step.
@@ -103,11 +104,15 @@ def attention_decoder(
                 coverage:
                     new coverage vector. shape (batch_size, attn_len, 1, 1)
             """
+            if not isinstance(decoder_state, tf.contrib.rnn.LSTMStateTuple):
+                # Is two layer LSTM. Use just the top layer state to compute attention.
+                decoder_state = decoder_state[1]
+
             with variable_scope.variable_scope("Attention"):
                 # Pass the decoder state through a linear layer (this is W_s s_t + b_attn in the
                 # paper)
                 # shape (batch_size, attention_vec_size)
-                decoder_features = linear(decoder_state, attention_vec_size, True)
+                decoder_features = linear(decoder_state, attention_vec_size, bias=True)
                 # reshape to (batch_size, 1, 1, attention_vec_size)
                 decoder_features = tf.expand_dims(tf.expand_dims(decoder_features, 1), 1)
 
@@ -180,7 +185,7 @@ def attention_decoder(
             input_size = inp.get_shape().with_rank(2)[1]
             if input_size.value is None:
                 raise ValueError("Could not infer input size from input: %s" % inp.name)
-            x = linear([inp] + [context_vector], input_size, True)
+            x = linear([inp] + [context_vector], input_size, bias=True)
 
             # Run the decoder RNN cell. cell_output = decoder state
             cell_output, state = cell(x, state)
@@ -197,14 +202,20 @@ def attention_decoder(
 
             # Calculate p_gen
             with tf.variable_scope('calculate_pgen'):
-                p_gen = linear([context_vector, state.c, state.h, x], 1, True)
+                if isinstance(state, tf.contrib.rnn.LSTMStateTuple):
+                    p_gen_c, p_gen_h = state.c, state.h
+                else:
+                    # Is two layer LSTM. Just use top layer's state.
+                    p_gen_c, p_gen_h = state[1].c, state[1].h
+
+                p_gen = linear([context_vector, p_gen_c, p_gen_h, x], 1, bias=True)
                 p_gen = tf.sigmoid(p_gen)
                 p_gens.append(p_gen)
 
             # Concatenate the cell_output (= decoder state) and the context vector, and pass them
             # through a linear layer. This is V[s_t, h*_t] + b in the paper.
             with variable_scope.variable_scope("AttnOutputProjection"):
-                output = linear([cell_output] + [context_vector], cell.output_size, True)
+                output = linear([cell_output] + [context_vector], cell.output_size, bias=True)
             outputs.append(output)
 
         # If using coverage, reshape it

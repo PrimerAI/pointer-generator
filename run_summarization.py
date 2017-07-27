@@ -22,7 +22,7 @@ tf.app.flags.DEFINE_string('embeddings_path', '', 'For the start of training, if
 # Important settings
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
 tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a fixed checkpoint, i.e. take the current checkpoint, and use it to produce one summary for each example in the dataset, write the summaries to file and then get ROUGE scores for the whole dataset. If False (default), run concurrent decoding, i.e. repeatedly load latest checkpoint, use it to produce summaries for randomly-chosen examples and log the results to screen, indefinitely.')
-tf.app.flags.DEFINE_boolean('two_layer_encoder', False, 'If True, make the encoder a two-layer bi-directional LSTM.')
+tf.app.flags.DEFINE_boolean('two_layer_lstm', False, 'If True, make the encoder and decoder use two-layer bi-directional LSTMs.')
 tf.app.flags.DEFINE_boolean('restrictive_embeddings', False, 'If True, then restricts word embeddings to be a linear transform of the pretrained embeddings.')
 tf.app.flags.DEFINE_integer('output_vocab_size', 0, 'If set, limits the size of the vocab for decoding.')
 tf.app.flags.DEFINE_boolean('copy_only_entities', False, 'If set, can only copy entities from the article.')

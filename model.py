@@ -44,7 +44,7 @@ Hps = namedtuple('Hyperparameters', (
     'save_matmul',
     'tied_output',
     'trunc_norm_init_std',
-    'two_layer_encoder',
+    'two_layer_lstm',
 ))
 
 
@@ -147,32 +147,12 @@ class SummarizationModel(object):
                 ([batch_size, enc_hidden_dim], [batch_size, enc_hidden_dim]).
         """
         with tf.variable_scope('encoder'):
-            if self._hps.two_layer_encoder:
-                cells_fw = [
-                    tf.contrib.rnn.LSTMCell(
-                        self._hps.enc_hidden_dim,
-                        initializer=self.rand_unif_init,
-                        state_is_tuple=True,
-                    )
-                    for i in range(2)
-                ]
-                cells_bw = [
-                    tf.contrib.rnn.LSTMCell(
-                        self._hps.enc_hidden_dim,
-                        initializer=self.rand_unif_init,
-                        state_is_tuple=True,
-                    )
-                    for i in range(2)
-                ]
-                cell_fw = tf.contrib.rnn.MultiRNNCell(cells_fw, state_is_tuple=True)
-                cell_bw = tf.contrib.rnn.MultiRNNCell(cells_bw, state_is_tuple=True)
-            else:
-                cell_fw = tf.contrib.rnn.LSTMCell(
-                    self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
-                )
-                cell_bw = tf.contrib.rnn.LSTMCell(
-                    self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
-                )
+            cell_fw = tf.contrib.rnn.LSTMCell(
+                self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
+            )
+            cell_bw = tf.contrib.rnn.LSTMCell(
+                self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
+            )
 
             encoder_outputs, (fw_st, bw_st) = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len,
@@ -180,16 +160,27 @@ class SummarizationModel(object):
             )
             # concatenate the forwards and backwards states
             encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
-            if self._hps.two_layer_encoder:
-                # Output states are tuples of final states at each level. Just take the top layer's
-                # output states.
-                fw_st = fw_st[1]
-                bw_st = bw_st[1]
+
+            if self._hps.two_layer_lstm:
+                # Run one more bidirectional rnn that takes in the concatenated outputs of the
+                # previous rnn as input.
+                cell_fw_top = tf.contrib.rnn.LSTMCell(
+                    self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
+                )
+                cell_bw_top = tf.contrib.rnn.LSTMCell(
+                    self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
+                )
+                encoder_outputs, (fw_st, bw_st) = tf.nn.bidirectional_dynamic_rnn(
+                    cell_fw_top, cell_bw_top, encoder_outputs, dtype=tf.float32,
+                    sequence_length=seq_len, swap_memory=True, scope='layer_two'
+                )
+                # concatenate the forwards and backwards states
+                encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
 
         return encoder_outputs, fw_st, bw_st
 
 
-    def _reduce_states(self, fw_st, bw_st):
+    def _reduce_states(self, fw_st, bw_st, scope):
         """
         Add to the graph a linear layer to reduce the encoder's final FW and BW state into a single
         initial state for the decoder. This is needed because the encoder is bidirectional but the
@@ -204,7 +195,7 @@ class SummarizationModel(object):
         """
         enc_hidden_dim = self._hps.enc_hidden_dim
         dec_hidden_dim = self._hps.dec_hidden_dim
-        with tf.variable_scope('reduce_final_st'):
+        with tf.variable_scope(scope):
 
             # Define weights and biases to reduce the cell and reduce the state
             w_reduce_c = tf.get_variable(
@@ -254,9 +245,18 @@ class SummarizationModel(object):
             coverage: A tensor, the current coverage vector
         """
         hps = self._hps
-        cell = tf.contrib.rnn.LSTMCell(
-            hps.dec_hidden_dim, state_is_tuple=True, initializer=self.rand_unif_init
-        )
+        if hps.two_layer_lstm:
+            cells = [
+                tf.contrib.rnn.LSTMCell(
+                    hps.dec_hidden_dim, state_is_tuple=True, initializer=self.rand_unif_init
+                )
+                for i in range(2)
+            ]
+            cell = tf.contrib.rnn.MultiRNNCell(cells, state_is_tuple=True)
+        else:
+            cell = tf.contrib.rnn.LSTMCell(
+                hps.dec_hidden_dim, state_is_tuple=True, initializer=self.rand_unif_init
+            )
 
         # In decode mode, we run attention_decoder one step at a time and so need to pass in the
         # previous step's coverage vector each time
@@ -611,7 +611,13 @@ class SummarizationModel(object):
             # Our encoder is bidirectional and our decoder is unidirectional so we need to reduce
             # the final encoder hidden state to the right size to be the initial decoder hidden
             # state.
-            self._dec_in_state = self._reduce_states(fw_st, bw_st)
+            if hps.two_layer_lstm:
+                first_dec_in_state = self._reduce_states(fw_st, bw_st, 'reduce_final_st_1')
+                second_dec_in_state = self._reduce_states(fw_st, bw_st, 'reduce_final_st_2')
+                # tuple of states, one value per layer
+                self._dec_in_state = first_dec_in_state, second_dec_in_state
+            else:
+                self._dec_in_state = self._reduce_states(fw_st, bw_st, 'reduce_final_st')
 
             # Add the decoder.
             with tf.variable_scope('decoder'):
@@ -804,9 +810,13 @@ class SummarizationModel(object):
             batch: Batch object that is the same example repeated across the batch (for beam search)
     
         Returns:
-            enc_states: The encoder states. A tensor of shape
+            enc_states:
+                The encoder states. A tensor of shape
                 [batch_size, <=max_enc_steps, 2*enc_hidden_dim].
-            dec_in_state: A LSTMStateTuple of shape ([1, dec_hidden_dim],[1, dec_hidden_dim])
+            dec_in_state:
+                A LSTMStateTuple of shape ([1, dec_hidden_dim],[1, dec_hidden_dim]). If two layers,
+                then a tuple of such LSTMStateTuples.
+                
         """
         # Feed the batch into the placeholders
         feed_dict = self._make_feed_dict(batch, just_enc=True)
@@ -819,7 +829,14 @@ class SummarizationModel(object):
         # ([batch_size, dec_hidden_dim], [batch_size, dec_hidden_dim]).
         # Given that the batch is a single example repeated, dec_in_state is identical across the
         # batch so we just take the top row.
-        dec_in_state = tf.contrib.rnn.LSTMStateTuple(dec_in_state.c[0], dec_in_state.h[0])
+        if self._hps.two_layer_lstm:
+            dec_in_state = tuple(
+                tf.contrib.rnn.LSTMStateTuple(dec_in_state[l].c[0], dec_in_state[l].h[0])
+                for l in range(2)
+            )
+        else:
+            dec_in_state = tf.contrib.rnn.LSTMStateTuple(dec_in_state.c[0], dec_in_state.h[0])
+
         return enc_states, dec_in_state
 
 
@@ -839,7 +856,8 @@ class SummarizationModel(object):
             enc_states:
                 The encoder states.
             dec_init_states:
-                List of beam_size LSTMStateTuples; the decoder states from the previous timestep
+                List of beam_size LSTMStateTuples; the decoder states from the previous timestep.
+                If two layers, each state is instead a tuple of LSTMStateTuples.
             prev_coverage:
                 List of np arrays. The coverage vectors from the previous timestep. List of None
                 if not using coverage.
@@ -851,7 +869,8 @@ class SummarizationModel(object):
                 top 2k log probabilities. shape [beam_size, 2*beam_size]
             new_states:
                 new states of the decoder. a list length beam_size containing LSTMStateTuples
-                each of shape ([dec_hidden_dim,],[dec_hidden_dim,])
+                each of shape ([dec_hidden_dim,],[dec_hidden_dim,]). If two layers, each state
+                is instead a tuple of LSTMStateTuples.
             attn_dists:
                 List length beam_size containing lists length attn_length.
             p_gens:
@@ -864,13 +883,21 @@ class SummarizationModel(object):
 
         beam_size = len(dec_init_states)
 
-        # Turn dec_init_states (a list of LSTMStateTuples) into a single LSTMStateTuple for the
-        # batch.
-        cells = [np.expand_dims(state.c, axis=0) for state in dec_init_states]
-        hiddens = [np.expand_dims(state.h, axis=0) for state in dec_init_states]
-        new_c = np.concatenate(cells, axis=0)  # shape [batch_size, dec_hidden_dim]
-        new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size, dec_hidden_dim]
-        new_dec_in_state = tf.contrib.rnn.LSTMStateTuple(new_c, new_h)
+        if not self._hps.two_layer_lstm:
+            dec_init_states = [tuple([state]) for state in dec_init_states]
+
+        # Turn dec_init_states (a list of tuple of LSTMStateTuples) into a single LSTMStateTuple
+        # (or tuple of LSTMStateTuples) for the batch.
+        n_layers = 2 if self._hps.two_layer_lstm else 1
+        new_dec_in_states = []
+        for l in range(n_layers):
+            cells = [np.expand_dims(state[l].c, axis=0) for state in dec_init_states]
+            hiddens = [np.expand_dims(state[l].h, axis=0) for state in dec_init_states]
+            new_c = np.concatenate(cells, axis=0)  # shape [batch_size, dec_hidden_dim]
+            new_h = np.concatenate(hiddens, axis=0)  # shape [batch_size, dec_hidden_dim]
+            new_dec_in_states.append(tf.contrib.rnn.LSTMStateTuple(new_c, new_h))
+
+        new_dec_in_state = tuple(new_dec_in_states) if self._hps.two_layer_lstm else new_dec_in_states[0]
 
         feed = {
             self._enc_states: enc_states,
@@ -908,13 +935,24 @@ class SummarizationModel(object):
 
         # Convert results['states'] (a single lstmstatetuple) into a list of lstmstatetuple,
         # one for each hypothesis.
-        new_states = [
-            tf.contrib.rnn.LSTMStateTuple(results['states'].c[i, :], results['states'].h[i, :])
-            for i in xrange(beam_size)
-        ]
+        if self._hps.two_layer_lstm:
+            new_states = [
+                tuple(
+                    tf.contrib.rnn.LSTMStateTuple(
+                        results['states'][l].c[i, :], results['states'][l].h[i, :]
+                    )
+                    for l in range(2)
+                )
+                for i in xrange(beam_size)
+            ]
+        else:
+            new_states = [
+                tf.contrib.rnn.LSTMStateTuple(results['states'].c[i, :], results['states'].h[i, :])
+                for i in xrange(beam_size)
+            ]
 
         # Convert singleton list containing a tensor to a list of k arrays.
-        assert len(results['attn_dists'])==1
+        assert len(results['attn_dists']) == 1
         attn_dists = results['attn_dists'][0].tolist()
 
         # Convert singleton list containing a tensor to a list of k arrays.

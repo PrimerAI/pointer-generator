@@ -4,7 +4,7 @@ Library method to summarize given text.
 import os
 
 
-_model_dir = 'saved_models/combined_test'
+_model_dir = 'saved_models/combined_new'
 _vocab_path = os.path.join(_model_dir, 'vocab')
 _vocab_size = 20000
 _beam_size = 5
@@ -34,7 +34,7 @@ def _load_model():
         # parameters important for decoding
         batch_size=_beam_size,
         copy_only_entities=False,
-        coverage=False,
+        coverage=True,
         emb_dim=128,
         enc_hidden_dim=256,
         dec_hidden_dim=400,
@@ -44,7 +44,7 @@ def _load_model():
         restrictive_embeddings=False,
         save_matmul=False,
         tied_output=True,
-        two_layer_encoder=False,
+        two_layer_lstm=False,
         # other parameters
         adagrad_init_acc=.1,
         adam_optimizer=True,

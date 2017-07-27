@@ -295,6 +295,8 @@ def write_results(out_file):
         spacy_article = doc.spacy_text()
         seq_to_seq, hyp, score = generate_summary(spacy_article)
         summaries.append(seq_to_seq)
+        print '####################'
+        print seq_to_seq
 
         # Print all results together
         for i, summ in enumerate(summaries):
@@ -340,16 +342,6 @@ def get_cable_results(data_file, out_file):
     out.close()
 
 
-def print_results():
-    for filename in os.listdir(RESULTS_ARTICLE_DIR):
-        with open(os.path.join(RESULTS_ARTICLE_DIR, filename)) as f:
-            article_text = unicode(f.read(), 'utf-8').replace(u'\xa0', ' ')
-
-        doc = SingleDocument(0, raw={'body': article_text})
-        spacy_article = doc.spacy_text()
-        print '#################'
-        print generate_summary(spacy_article)[0]
-
 
 ######################################################
 # Generate sample summaries
@@ -360,8 +352,7 @@ if __name__ == '__main__':
     #compute_reduced_embeddings_original_vocab(
     #    sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
     #)
-    #write_results(sys.argv[1])
+    write_results(sys.argv[1])
     #find_articles()
     #generate_input_file(sys.argv[1])
     #get_cable_results(sys.argv[1], sys.argv[2])
-    print_results()
