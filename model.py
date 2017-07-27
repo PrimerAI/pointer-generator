@@ -98,7 +98,8 @@ class SummarizationModel(object):
 
 
     def _make_feed_dict(self, batch, just_enc=False, dec_batch=None):
-        """Make a feed dictionary mapping parts of the batch to the appropriate placeholders.
+        """
+        Make a feed dictionary mapping parts of the batch to the appropriate placeholders.
     
         Args:
             batch: Batch object
@@ -304,6 +305,7 @@ class SummarizationModel(object):
                 )
                 keep_copy = tf.to_float(keep_copy)
                 attn_dists = [keep_copy * dist for dist in attn_dists]
+                attn_dists = [tf.nn.softmax(dist) for dist in attn_dists]
 
             # Concatenate some zeros to each vocabulary dist, to hold the probabilities for
             # in-article OOV words
@@ -900,6 +902,7 @@ class SummarizationModel(object):
         new_dec_in_state = tuple(new_dec_in_states) if self._hps.two_layer_lstm else new_dec_in_states[0]
 
         feed = {
+            self._enc_batch: batch.enc_batch,
             self._enc_states: enc_states,
             self._dec_in_state: new_dec_in_state,
             self._dec_batch: np.transpose(np.array([latest_tokens])),

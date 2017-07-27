@@ -4,7 +4,7 @@ Library method to summarize given text.
 import os
 
 
-_model_dir = 'saved_models/combined_new'
+_model_dir = 'saved_models/abstr'
 _vocab_path = os.path.join(_model_dir, 'vocab')
 _vocab_size = 20000
 _beam_size = 5
@@ -33,12 +33,12 @@ def _load_model():
     _hps = Hps(
         # parameters important for decoding
         batch_size=_beam_size,
-        copy_only_entities=False,
-        coverage=True,
+        copy_only_entities=True,
+        coverage=False,
         emb_dim=128,
         enc_hidden_dim=256,
         dec_hidden_dim=400,
-        max_enc_steps=500,
+        max_enc_steps=300,
         mode='decode',
         output_vocab_size=20000,
         restrictive_embeddings=False,
