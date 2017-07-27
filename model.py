@@ -296,7 +296,6 @@ class SummarizationModel(object):
         with tf.variable_scope('final_distribution'):
             # Multiply vocab dists by p_gen and attention dists by (1 - p_gen)
             vocab_dists = [p_gen * dist for (p_gen, dist) in zip(self.p_gens, vocab_dists)]
-            attn_dists = [(1 - p_gen) * dist for (p_gen, dist) in zip(self.p_gens, attn_dists)]
 
             if self._hps.copy_only_entities:
                 keep_copy = tf.logical_and(
@@ -306,6 +305,8 @@ class SummarizationModel(object):
                 keep_copy = tf.to_float(keep_copy)
                 attn_dists = [keep_copy * dist for dist in attn_dists]
                 attn_dists = [tf.nn.softmax(dist) for dist in attn_dists]
+
+            attn_dists = [(1 - p_gen) * dist for (p_gen, dist) in zip(self.p_gens, attn_dists)]
 
             # Concatenate some zeros to each vocabulary dist, to hold the probabilities for
             # in-article OOV words
