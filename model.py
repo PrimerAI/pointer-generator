@@ -193,7 +193,7 @@ class SummarizationModel(object):
             # the final encoder hidden state to the right size to be the initial decoder hidden
             # state.
             with tf.variable_scope('reduce_final_st'):
-                self.dec_in_state = self._reduce_states(fw_st, bw_st)
+                self._dec_in_state = self._reduce_states(fw_st, bw_st)
             if hps.two_layer_lstm:
                 with tf.variable_scope('reduce_final_st_top'):
                     top_dec_in_state = self._reduce_states(fw_st, bw_st)

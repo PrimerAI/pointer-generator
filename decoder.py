@@ -4,9 +4,10 @@ https://github.com/abisee/pointer-generator and is trained on 300K news articles
 CNN / Dailymail and 100K new cables.
 """
 import os
+from spacy.tokens.doc import Doc
 
 
-_model_dir = 'saved_models/abstr'
+_model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_parameters')
 _vocab_path = os.path.join(_model_dir, 'vocab')
 _vocab_size = 20000
 _beam_size = 5
@@ -35,12 +36,13 @@ def _load_model():
     _hps = Hps(
         # parameters important for decoding
         batch_size=_beam_size,
-        copy_only_entities=True,
+        copy_only_entities=False,
         coverage=False,
         emb_dim=128,
         enc_hidden_dim=256,
         dec_hidden_dim=400,
-        max_enc_steps=300,
+        max_dec_steps=1,
+        max_enc_steps=400,
         mode='decode',
         output_vocab_size=20000,
         restrictive_embeddings=False,
@@ -53,7 +55,6 @@ def _load_model():
         cov_loss_wt=1.,
         high_attn_loss_wt=0.,
         lr=.15,
-        max_dec_steps=1,
         max_grad_norm=2.,
         people_loss_wt=0.,
         rand_unif_init_mag=.02,
@@ -82,9 +83,12 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
         doc.spacy_text(), so for best results the input here should also come from doc.spacy_text().
     
     Returns:
-        tuple of unicode summary of the text and scalar score of its quality.
-        [TODO] specify range of the score
+        Tuple of unicode summary of the text and scalar score of its quality. Score is approximately
+        an average log-likelihood of the summary (so it is < 0.) and typically is in the range
+        [-.2, -.5]. Summaries with scores below -.4 are usually not very good.
     """
+    assert isinstance(spacy_article, Doc)
+
     # These imports are slow - lazy import.
     from batcher import Batch, Example
     from beam_search import run_beam_search
@@ -96,7 +100,8 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
     # Handle short inputs
     article_tokens, _, orig_article_tokens = process_article(spacy_article)
     if len(article_tokens) <= ideal_summary_length_tokens:
-        return spacy_article.text
+        return spacy_article.text, 0.
+
     min_summary_length = min(10 + len(article_tokens) / 10, 2 * ideal_summary_length_tokens / 3)
     max_summary_length = min(10 + len(article_tokens) / 5, 3 * ideal_summary_length_tokens / 2)
 
