@@ -11,8 +11,8 @@ import language_check
 
 class Hypothesis(object):
     """
-    Class to represent a hypothesis during beam search. Holds all the information needed for the
-    hypothesis.
+    Class to represent a hypothesis (partial output of a summary) during beam search. Holds all
+    the information needed for the hypothesis.
     """
 
     def __init__(self, tokens, token_strings, log_probs, state, attn_dists, p_gens, coverage):
@@ -28,7 +28,8 @@ class Hypothesis(object):
                 List, same length as tokens, of floats, giving the log probabilities of the tokens
                 so far.
             state:
-                Current state of the decoder, a LSTMStateTuple.
+                Current state of the decoder, a LSTMStateTuple. If two layer LSTM, then a tuple of
+                LSTMStateTuples.
             attn_dists:
                 List, same length as tokens, of numpy arrays with shape (attn_length). These are
                 the attention distributions so far.
@@ -46,31 +47,13 @@ class Hypothesis(object):
         self.attn_dists = attn_dists
         self.p_gens = p_gens
         self.coverage = coverage
+        # caches score for hypothesis
         self._scores = {}
 
 
     def extend(self, token, token_string, log_prob, state, attn_dist, p_gen, coverage):
         """
         Return a NEW hypothesis, extended with the information from the latest step of beam search.
-    
-        Args:
-            token:
-                Integer. Latest token produced by beam search.
-            token_string:
-                string. Latest string produced by beam search.
-            log_prob:
-                Float. Log prob of the latest token.
-            state:
-                Current decoder state, a LSTMStateTuple.
-            attn_dist:
-                Attention distribution from latest step. Numpy array shape (attn_length).
-            p_gen:
-                Generation probability on latest step. Float.
-            coverage:
-                Latest coverage vector. Numpy array shape (attn_length), or None if not using
-                coverage.
-        Returns:
-            New Hypothesis for next step.
         """
         return Hypothesis(
             tokens=self.tokens + [token],
@@ -106,12 +89,16 @@ class Hypothesis(object):
     def score(self, vocab_size, key_token_ids, is_complete):
         """
         Returns a score for the hypothesis. If it breaks certain common-sense rules, return
-        -10 ** 6. Else, return something like the mean log probability of a token in the sequence.
+        -10 ** 6. Else, return the average log probability of a token in the sequence with
+        modifications for using pronouns and generation probabilities.
         
         Args:
             vocab_size: Integer.
             key_token_ids: dictionary containing IDs for 'stop', 'comma', 'period', 'pronouns'.
             is_complete: Whether to treat this as a complete output or partial output.
+        
+        Returns:
+            total_score: Float.
         """
         if is_complete in self._scores:
             # Score is already computed.
@@ -140,15 +127,6 @@ class Hypothesis(object):
         return total_score
 
 
-def get_key_token_ids(vocab):
-    return {
-        'stop': vocab.word2id(data.STOP_DECODING, None),
-        'comma': vocab.word2id(',', None),
-        'period': vocab.word2id('.', None),
-        'pronouns': {vocab.word2id(word, None) for word in ('he', 'she', 'him', 'her')},
-    }
-
-
 def run_beam_search(
     sess, model, vocab, batch, beam_size, max_dec_steps, min_dec_steps, trace_path=''
 ):
@@ -160,14 +138,18 @@ def run_beam_search(
         model: a seq2seq model
         vocab: Vocabulary object
         batch: Batch object that is the same example repeated across the batch
+        beam_size: Integer, size of the search at each step
+        max_dec_steps: Integer, stop search after this many steps
+        min_dec_steps: Integer, accept results of at least this length only
+        trace_path: string, if provided save trace results to this path
   
     Returns:
         best_hyp: Hypothesis object; the best hypothesis found by beam search.
+        score: the score of the best hypothesis.
     """
-    article_id_to_word_id = batch.article_id_to_word_ids[0]
-    # Run the encoder to get the encoder hidden states and decoder initial state
-    # dec_in_state is a LSTMStateTuple
+    # Run the encoder to get the encoder hidden states and decoder initial state.
     # enc_states has shape [batch_size, <=max_enc_steps, 2*enc_hidden_dim].
+    # dec_in_state is a LSTMStateTuple, or if two layer lstm then a tuple of LSTMStateTuples.
     enc_states, dec_in_state = model.run_encoder(sess, batch)
 
     # Initialize beam_size-many hypotheses
@@ -184,15 +166,21 @@ def run_beam_search(
         )
         for _ in xrange(beam_size)
     ]
-    # this will contain finished hypotheses (those that have emitted the [STOP] token)
+    # This will contain finished hypotheses (those that have emitted the [STOP] token).
     results = []
-    key_token_ids = get_key_token_ids(vocab)
+    # Ids for tokens that will be needed for scoring hypotheses.
+    key_token_ids = {
+        'stop': vocab.word2id(data.STOP_DECODING, None),
+        'comma': vocab.word2id(',', None),
+        'period': vocab.word2id('.', None),
+        'pronouns': {vocab.word2id(word, None) for word in ('he', 'she', 'him', 'her')},
+    }
 
     steps = 0
     while steps < max_dec_steps and len(results) < 4 * beam_size:
         latest_tokens = [h.latest_token for h in hyps]
         # change any in-article temporary OOV ids to [UNK] id, so that we can lookup word embeddings
-        latest_tokens = [article_id_to_word_id.get(t, t) for t in latest_tokens]
+        latest_tokens = [batch.article_id_to_word_ids[0].get(t, t) for t in latest_tokens]
         # list of current decoder states of the hypotheses
         states = [h.state for h in hyps]
         # list of coverage vectors (or None)
@@ -220,11 +208,12 @@ def run_beam_search(
                 hyps[i], new_states[i], attn_dists[i], p_gens[i], new_coverage[i]
             )
             for j in xrange(2 * beam_size):
+                token_string = data.outputid_to_word(topk_ids[i, j], vocab, batch.art_oovs[0])
                 # For each of the top 2 * beam_size hyps:
                 # Extend the ith hypothesis with the jth option
                 new_hyp = h.extend(
                     token=topk_ids[i, j],
-                    token_string=data.outputid_to_word(topk_ids[i, j], vocab, batch.art_oovs[0]),
+                    token_string=token_string,
                     log_prob=topk_log_probs[i, j],
                     state=new_state,
                     attn_dist=attn_dist,
@@ -255,15 +244,17 @@ def run_beam_search(
         steps += 1
 
     if trace_path:
+        # If needed, record trace of the search performance.
         for i, trace in enumerate(model._traces):
             with open(os.path.join(trace_path, 'timeline_%d.json' % i), 'w') as f:
                 f.write(trace)
 
-    # At this point, either we've got 4 * beam_size results, or we've reached maximum decoder steps
+    # At this point, either we've got 4 * beam_size results, or we've reached maximum decoder steps.
 
     if len(results) == 0:
-        # if we don't have any complete results, add all current hypotheses (incomplete summaries)
-        # to results
+        # If we don't have any complete results, add all current hypotheses (incomplete summaries)
+        # to results. Note: we still use complete_hyps=True in the next step since we want to
+        # check for valid grammar properties.
         results = hyps
 
     # Sort hypotheses by average log probability
@@ -288,7 +279,7 @@ def sort_hyps(hyps, vocab_size, key_token_ids, complete_hyps):
 
 def _has_unknown_token(tokens, stop_token_id):
     """
-    Returns whether any of the tokens generated are unknown (except the STOP token).
+    Returns whether any of the tokens generated are unknown (except possible a final STOP token).
     """
     if any(token < data.N_FREE_TOKENS for token in tokens[1:-1]):
         return True

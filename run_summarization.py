@@ -9,7 +9,7 @@ import numpy as np
 from data import Vocab
 from batcher import Batcher
 from model import Hps, Settings, SummarizationModel
-from decode import BeamSearchDecoder
+from decode_eval import BeamSearchDecoder
 import util
 
 FLAGS = tf.app.flags.FLAGS
@@ -54,6 +54,7 @@ tf.app.flags.DEFINE_float('cov_loss_wt', 1.0, 'Weight of coverage loss (lambda i
 tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-coverage model to a coverage model. Turn this on and run in train mode. Your current model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
 tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
 tf.app.flags.DEFINE_float('people_loss_wt', 0., 'If set, will add a loss for people tokens.')
+tf.app.flags.DEFINE_float('high_attn_loss_wt', 0., 'If set, adds a loss for high attention on non-entity tokens.')
 
 # Output projection weights
 tf.app.flags.DEFINE_boolean('tied_output', True, 'Whether the output matrix is a multiple of the embeddings.')

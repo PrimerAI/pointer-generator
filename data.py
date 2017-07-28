@@ -21,11 +21,11 @@ START_DECODING = '[START]'
 # This is used at the end of untruncated target sequences.
 STOP_DECODING = '[STOP]'
 
-# These are used for tokens labeled as people by our people resolver. [PERSON_0] is the most
+# These are used for tokens labeled as people by the people resolver. [PERSON_0] is the most
 # commonly appearing person, all the way down to [PERSON_{PEOPLE_ID_SIZE}]. [PERSON] is for all
 # remaining people tokens.
 PERSON_TOKENS = tuple('[PERSON_%d]' % i for i in range(PEOPLE_ID_SIZE)) + ('[PERSON]',)
-# These are all the entity tokens labeled by spacy (and includes people tokens above)
+# These are all the entity tokens labeled by spacy (and includes people tokens above).
 ENTITY_TOKENS = PERSON_TOKENS + (
     '[NORP]',
     '[FACILITY]',
@@ -110,12 +110,11 @@ class Vocab(object):
                 if len(pieces) > 2:
                     print 'Warning: incorrectly formatted line in vocabulary file: %s\n' % line
                     continue
+
+                # Handle improper words
                 w = pieces[0]
                 if w in (PAD_TOKEN, START_DECODING, STOP_DECODING) + UNKNOWN_TOKENS:
-                    raise Exception(
-                        '<s>, </s>, [UNK], [PAD], [START] and [STOP] shouldn\'t be in the vocab '
-                        'file, but %s is' % w
-                    )
+                    raise Exception('%s should not be in vocab file' % w)
                 if w in self._word_to_id:
                     raise Exception('Duplicated word in vocabulary file: %s' % w)
 
@@ -127,6 +126,7 @@ class Vocab(object):
                 if sum(1 for c in w if c not in ascii_plus_period) > 2:
                     continue
 
+                # Add to vocab
                 self._word_to_id[w] = self._count
                 self._id_to_word[self._count] = w
                 self._count += 1
@@ -373,7 +373,7 @@ def outputid_to_word(id_, vocab, article_oovs):
         word: string
     """
     try:
-        # might be [UNK]
+        # might be unknown
         w = vocab.id2word(id_)
     except ValueError:
         # w is OOV
@@ -439,7 +439,7 @@ def parse_word(word):
     word can be of the form:
     
     - "word{i}" -> word, PERSON_i
-    - "word[POS]" -> word, POS
+    - "word[entity_or_POS]" -> word, entity_or_POS
     - "word" -> word, None
     """
     def find_match(pattern):

@@ -9,7 +9,7 @@ from sklearn.decomposition.truncated_svd import TruncatedSVD
 from tensorflow.core.example import example_pb2
 
 from data import N_FREE_TOKENS, Vocab
-from generate import generate_summary
+from decoder import generate_summary
 from make_datafiles import get_art_abs
 from pygov.analytic_pipeline.common.summary import compute_summaries
 from pygov.analytic_pipeline.document_pipeline import SingleDocument
@@ -293,7 +293,7 @@ def write_results(out_file):
 
         # Generate seq-to-seq summary on the fly
         spacy_article = doc.spacy_text()
-        seq_to_seq, hyp, score = generate_summary(spacy_article)
+        seq_to_seq, score = generate_summary(spacy_article)
         summaries.append(seq_to_seq)
         print '####################'
         print seq_to_seq
@@ -329,7 +329,7 @@ def get_cable_results(data_file, out_file):
             continue
 
         lexrank = get_lexrank_summary(doc)
-        seq2seq = generate_summary(doc.spacy_text())
+        seq2seq = generate_summary(doc.spacy_text())[0]
 
         out.write(
             '\t'.join([

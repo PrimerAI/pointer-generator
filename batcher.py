@@ -1,5 +1,5 @@
 """
-This file contains code to process data into batches.
+This file contains code to define model inputs and process data into batches.
 """
 
 import Queue
@@ -15,7 +15,7 @@ import data
 
 class Example(object):
     """
-    Class representing a train / val / test example for text summarization.
+    Class representing a train / val / test example for input to the model.
     """
 
     def __init__(self, article, abstract, vocab, hps):
@@ -40,34 +40,37 @@ class Example(object):
         if len(article_words) > hps.max_enc_steps:
             article_words = article_words[:hps.max_enc_steps]
 
-        # store the length after truncation but before padding
+        # Store the length after truncation but before padding
         self.enc_len = len(article_words)
-        # list of word ids; OOVs are represented by the id for UNK token
+        # List of word ids; OOVs and entities are represented by ids less than data.N_FREE_TOKENS
         self.enc_input = [vocab.word2id(w, word_type) for w, word_type in article_words]
 
         # Process the abstract
         abstract_words = [data.parse_word(word) for word in abstract.split()]
-        # list of word ids; OOVs are represented by the id for UNK token
+        # List of word ids; OOVs and entities are represented by ids less than data.N_FREE_TOKENS
         abs_ids = [vocab.word2id(w, word_type) for w, word_type in abstract_words]
 
-        # Get the decoder input sequence and target sequence
+        # Get the decoder input sequence and target sequence with non-article specific ids.
         self.dec_input, target_orig = self.get_dec_inp_targ_seqs(
             abs_ids, hps.max_dec_steps, start_decoding, stop_decoding
         )
         self.dec_len = len(self.dec_input)
-        # Store a version of the enc_input where in-article OOVs are represented by their
-        # temporary OOV id; also store the in-article OOVs words themselves
+        # Store a version of the enc_input where in-article OOVs and entities are represented by
+        # their temporary OOV id. Also store the in-article OOVs words themselves and a mapping
+        # from temporary OOV ids to vocab ids.
         self.enc_input_extend_vocab, self.article_oovs, self.article_id_to_word_id = (
             data.article2ids(article_words, vocab, hps.copy_only_entities)
         )
 
-        # Get a version of the reference summary where in-article OOVs are represented by their
-        # temporary article OOV id
+        # Get set of words that can be copied.
         if hps.copy_only_entities:
             # article_oovs only has entities
             copyable_words = set(self.article_oovs)
         else:
             copyable_words = set([w for w, word_type in article_words])
+
+        # Get a version of the reference summary where in-article OOVs are represented by their
+        # temporary article OOV id
         abs_ids_extend_vocab = data.abstract2ids(
             abstract_words, vocab, self.article_oovs, copyable_words, hps.output_vocab_size
         )
@@ -139,7 +142,7 @@ class Example(object):
 
     def pad_encoder_input(self, max_len, pad_id):
         """
-        Pad the encoder input sequence with pad_id up to max_len.
+        Pad the encoder input sequences with pad_id up to max_len.
         """
         while len(self.enc_input) < max_len:
             self.enc_input.append(pad_id)
