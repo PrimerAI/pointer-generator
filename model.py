@@ -532,7 +532,8 @@ class SummarizationModel(object):
 
         if self._hps.copy_only_entities:
             attn_dists = [self._entity_tokens * dist for dist in attn_dists]
-            attn_dists = [tf.nn.softmax(dist) for dist in attn_dists]
+            attn_sums = [tf.reduce_sum(dist, axis=1, keep_dims=True) for dist in attn_dists]
+            attn_dists = [dist / sum_ for dist, sum_ in zip(attn_dists, attn_sums)]
 
         attn_dists = [(1 - p_gen) * dist for (p_gen, dist) in zip(self.p_gens, attn_dists)]
 
