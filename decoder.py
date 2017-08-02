@@ -10,7 +10,7 @@ from spacy.tokens.doc import Doc
 _model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model_parameters')
 _vocab_path = os.path.join(_model_dir, 'vocab')
 _vocab_size = 20000
-_beam_size = 5
+_beam_size = 4
 
 _settings = None
 _hps = None
@@ -110,10 +110,10 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
     batch = Batch([example] * _beam_size, _hps, _vocab)
 
     # Generate output
-    hyp, score = run_beam_search(
+    hyp, score, llh = run_beam_search(
         _sess, _model, _vocab, batch, _beam_size, max_summary_length, min_summary_length
     )
 
     # Extract the output ids from the hypothesis and convert back to words
-    return process_output(hyp.token_strings[1:], orig_article_tokens), score
+    return process_output(hyp.token_strings[1:], orig_article_tokens), score, llh
 

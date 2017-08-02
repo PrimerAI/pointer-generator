@@ -7,6 +7,7 @@ import struct
 import sys
 from sklearn.decomposition.truncated_svd import TruncatedSVD
 from tensorflow.core.example import example_pb2
+import time
 
 from data import N_FREE_TOKENS, Vocab
 from decoder import generate_summary
@@ -183,20 +184,9 @@ def write_dummy_example(out_file):
 RAW_DATA_DIR = '/Users/michaelwu/dev/cnn-dailymail/raw_data/'
 RAW_ARTICLE_DIRS = (os.path.join(RAW_DATA_DIR, dir) for dir in ('cnn', 'dailymail'))
 
-RESULTS_DIR = '/Users/michaelwu/dev/text-summarization/results/'
+RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'results')
 RESULTS_ARTICLE_DIR = os.path.join(RESULTS_DIR, 'articles')
-RESULTS_ABSTRACT_DIR = os.path.join(RESULTS_DIR, 'abstract')
-
-# tuple of output name, dir, filename
-SUMMARY_OUTPUT_LOCATIONS = (
-    ('Reference', RESULTS_ABSTRACT_DIR, 'abstract_%d.txt'),
-    #('Normal', os.path.join(RESULTS_DIR, 'decoded_normal'), '%06d_decoded.txt'),
-    #('Coverage', os.path.join(RESULTS_DIR, 'decoded_coverage'), '%06d_decoded.txt'),
-    #('Coverage v4', os.path.join(RESULTS_DIR, 'decoded_coverage_4'), '%06d_decoded.txt'),
-    #('Restrictive', os.path.join(RESULTS_DIR, 'decoded_restr'), '%06d_decoded.txt'),
-    #('Corrective', os.path.join(RESULTS_DIR, 'decoded_corrective'), '%06d_decoded.txt'),
-    #('Abisee', os.path.join(abisee_result_dir, 'pointer-gen-cov'), '%s_decoded.txt'),
-)
+RESULTS_ABSTRACT_DIR = os.path.join(RESULTS_DIR, 'abstracts')
 
 N_ARTICLES = 100
 
@@ -266,48 +256,39 @@ def get_lexrank_summary(doc):
 
 def write_results(out_file):
     out = open(out_file, 'w')
-    out.write(
-        '\t'.join(
-            [name for name, dir, filename in SUMMARY_OUTPUT_LOCATIONS] +
-            ['Lexrank', 'Seq-to-seq ready']
-        ) + '\n'
-    )
+    out.write('\t'.join(['Reference', 'Lexrank', 'Seq-to-seq', 'LLH score']) + '\n')
 
     for filename in os.listdir(RESULTS_ARTICLE_DIR):
         article_id = int(filename.split('.')[0].split('_')[1])
 
         # Read article
         with open(os.path.join(RESULTS_ARTICLE_DIR, filename)) as f:
-            article_text = unicode(f.read(), 'utf-8').replace(u'\xa0', ' ')
+            article_text = unicode(f.read(), 'utf-8')
+            article_text = article_text.replace(u'\xa0', ' ').replace('\t', ' ').replace('\n', ' ')
 
-        # Read pregenerated seq-to-seq summaries
-        summaries = []
-        for name, summary_dir, summary_filename in SUMMARY_OUTPUT_LOCATIONS:
-            with open(os.path.join(summary_dir, summary_filename % article_id)) as f:
-                summaries.append(f.read())
+        # Read reference summary
+        with open(os.path.join(RESULTS_ABSTRACT_DIR, 'abstract_%d.txt' % article_id)) as f:
+            reference_summary = f.read()
 
         doc = SingleDocument(0, raw={'body': article_text})
 
-        # Generate lexrank summary on the fly
-        summaries.append(get_lexrank_summary(doc))
+        # Generate lexrank summary
+        lexrank_summary = get_lexrank_summary(doc).encode('utf-8')
 
-        # Generate seq-to-seq summary on the fly
+        # Generate seq-to-seq summary
+        t0 = time.time()
         spacy_article = doc.spacy_text()
-        seq_to_seq, score = generate_summary(spacy_article)
-        summaries.append(seq_to_seq)
+        seq_to_seq_summary, score, llh = generate_summary(spacy_article)
+        seq_to_seq_summary = seq_to_seq_summary.encode('utf-8')
+
         print '####################'
-        print seq_to_seq
+        print seq_to_seq_summary
+        print time.time() - t0, score, llh
 
-        # Print all results together
-        for i, summ in enumerate(summaries):
-            if isinstance(summ, unicode):
-                summ = summ.encode('utf-8')
-            out.write(summ.replace('\t', ' ').replace('\n', ' '))
-            if i == len(summaries) - 1:
-                out.write('\t%f\n' % score)
-            else:
-                out.write('\t')
-
+        # Write all results together
+        out.write('\t'.join([
+            reference_summary, lexrank_summary, seq_to_seq_summary, str(llh)
+        ]) + '\n')
         out.flush()
 
     out.close()

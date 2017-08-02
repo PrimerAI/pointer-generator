@@ -122,9 +122,27 @@ class Hypothesis(object):
             p if st != '.' else 0. for p, st in zip(self.p_gens, self.token_strings[1:])
         ])
 
+        people_score = 0.
+        org_score = 0.
+        for i, token in enumerate(self.tokens[:15]):
+            if token in key_token_ids['people']:
+                people_score = max(people_score, 1. - i / 15.)
+            elif token in key_token_ids['orgs']:
+                org_score = max(org_score, 1. - i / 15.)
+
+        total_score += max(.15 * people_score, .1 * org_score)
+
         # Save computed score
         self._scores[is_complete] = total_score
         return total_score
+
+
+    @property
+    def mean_llh(self):
+        """
+        Computes mean log-likelihood of each output token.
+        """
+        return sum(self.log_probs[1:]) / (len(self.log_probs) - 1)
 
 
 def run_beam_search(
@@ -169,11 +187,20 @@ def run_beam_search(
     # This will contain finished hypotheses (those that have emitted the [STOP] token).
     results = []
     # Ids for tokens that will be needed for scoring hypotheses.
+    org_id = vocab.word2id('[ORG]', None)
     key_token_ids = {
         'stop': vocab.word2id(data.STOP_DECODING, None),
         'comma': vocab.word2id(',', None),
         'period': vocab.word2id('.', None),
         'pronouns': {vocab.word2id(word, None) for word in ('he', 'she', 'him', 'her')},
+        'people': set(
+            article_id for article_id, word_id in batch.article_id_to_word_ids[0].iteritems()
+            if 3 <= word_id < len(data.PERSON_TOKENS) + 3
+        ),
+        'orgs': set(
+            article_id for article_id, word_id in batch.article_id_to_word_ids[0].iteritems()
+            if word_id == org_id
+        ),
     }
 
     steps = 0
@@ -263,7 +290,8 @@ def run_beam_search(
     # Return the hypothesis with highest average log prob
     best_hyp = hyps_sorted[0]
     score = best_hyp.score(vocab.size, key_token_ids, is_complete=True)
-    return best_hyp, score
+    llh = best_hyp.mean_llh
+    return best_hyp, score, llh
 
 
 def sort_hyps(hyps, vocab_size, key_token_ids, complete_hyps):

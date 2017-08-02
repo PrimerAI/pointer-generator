@@ -30,7 +30,7 @@ def test_real_article():
 
     # compute summary
     spacy_article = get_spacy()(data['text'])
-    summary, score = generate_summary(spacy_article)
+    summary, score, llh = generate_summary(spacy_article)
 
     # check summary
     assert isinstance(summary, unicode)
