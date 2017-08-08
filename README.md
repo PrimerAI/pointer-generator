@@ -60,7 +60,7 @@ Training can take between half a day to three days (or more!) depending on the c
 
 ## Generating
 
-Once trained, point the path in `decoder.py` to the subdirectory with the saved weights (the `train` directory in the log directory specified during training). Calling `generate_summary` returns the summary for a given document.
+Once trained, point the path in `decoder.py` to the subdirectory with the saved weights (the `train` directory in the log directory specified during training). Also update the hyperparameter values in that file to match those for the current model. Calling `generate_summary` returns the summary for a given document.
 
 # Experiments
 
