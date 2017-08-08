@@ -7,19 +7,27 @@ Here are the key files in the project:
 ## Model definition
 
 `model.py` - defines most of the model graph.
+
 `attention_decoder.py` - defines the decoder with attention.
+
 `data.py` - defines the vocab set and how to handle temporary article tokens for copying.
+
 `batcher.py` - processes the data set into batches of samples.
 
 ## Scripts
 `run_summarization.py` - main script for training and evaluating. Also converts model to coverage.
+
 `make_datafiles.py` - preprocesses the training data into a format useful for training.
+
 `scripts.py` - assortment of scripts for compiling initial word vectors for a vocabulary and generating sample outputs.
 
 ## Generating summaries
 `decoder.py` - contains top level method `generate_summary` for generating outputs.
+
 `model_parameters/` - contains one checkpoint of model parameters (as of 8/7/17).
+
 `beam_search.py` - the top level method `generate_summary`uses the code here to search for the best summary output.
+
 `io_processing.py` - the top level method `generate_summary` uses the code here to process the input and output.
 
 # Running the code
