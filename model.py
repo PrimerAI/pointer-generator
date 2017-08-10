@@ -939,7 +939,7 @@ class SummarizationModel(object):
                 to_return, feed_dict=feed, options=options, run_metadata=run_metadata
             )
 
-            fetched_timeline = timeline.timeline(run_metadata.step_stats)
+            fetched_timeline = timeline.Timeline(run_metadata.step_stats)
             chrome_trace = fetched_timeline.generate_chrome_trace_format()
             self._traces.append(chrome_trace)
         else:

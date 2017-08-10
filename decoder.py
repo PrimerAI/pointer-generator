@@ -31,7 +31,7 @@ def _load_model():
     _settings = Settings(
         embeddings_path='',
         log_root='',
-        trace_path='',
+        trace_path='',# traces/traces_blog',
     )
     _hps = Hps(
         # parameters important for decoding
@@ -68,7 +68,11 @@ def _load_model():
 
     # Load model from disk
     saver = tf.train.Saver()
-    config = tf.ConfigProto(allow_soft_placement=True)
+    config = tf.ConfigProto(
+        allow_soft_placement=True,
+        #intra_op_parallelism_threads=1,
+        #inter_op_parallelism_threads=1,
+    )
     _sess = tf.Session(config=config)
     ckpt_state = tf.train.get_checkpoint_state(_model_dir)
     saver.restore(_sess, ckpt_state.model_checkpoint_path)
@@ -90,6 +94,7 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
     assert isinstance(spacy_article, Doc)
 
     # These imports are slow - lazy import.
+    import time
     from batcher import Batch, Example
     from beam_search import run_beam_search
     from io_processing import process_article, process_output
@@ -98,7 +103,9 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
         _load_model()
 
     # Handle short inputs
+    t0 = time.time()
     article_tokens, _, orig_article_tokens = process_article(spacy_article)
+    print 'processing input', time.time() - t0
     if len(article_tokens) <= ideal_summary_length_tokens:
         return spacy_article.text, 0.
 
@@ -110,10 +117,12 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
     batch = Batch([example] * _beam_size, _hps, _vocab)
 
     # Generate output
-    hyp, score, llh = run_beam_search(
-        _sess, _model, _vocab, batch, _beam_size, max_summary_length, min_summary_length
+    t1 = time.time()
+    hyp, score = run_beam_search(
+        _sess, _model, _vocab, batch, _beam_size, max_summary_length, min_summary_length,
+        _settings.trace_path,
     )
+    print 'beam search', time.time() - t1
 
     # Extract the output ids from the hypothesis and convert back to words
-    return process_output(hyp.token_strings[1:], orig_article_tokens), score, llh
-
+    return process_output(hyp.token_strings[1:], orig_article_tokens), score

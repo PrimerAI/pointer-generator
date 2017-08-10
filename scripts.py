@@ -11,6 +11,7 @@ import time
 
 from data import N_FREE_TOKENS, Vocab
 from decoder import generate_summary
+#from primer_core.nlp.seq2seq_summarization.decoder import generate_summary
 from make_datafiles import get_art_abs
 from pygov.analytic_pipeline.common.summary import compute_summaries
 from pygov.analytic_pipeline.document_pipeline import SingleDocument
@@ -256,9 +257,9 @@ def get_lexrank_summary(doc):
 
 def write_results(out_file):
     out = open(out_file, 'w')
-    out.write('\t'.join(['Reference', 'Lexrank', 'Seq-to-seq', 'LLH score']) + '\n')
+    out.write('\t'.join(['Reference', 'Lexrank', 'Seq-to-seq', 'Score']) + '\n')
 
-    for filename in os.listdir(RESULTS_ARTICLE_DIR):
+    for filename in sorted(os.listdir(RESULTS_ARTICLE_DIR)):
         article_id = int(filename.split('.')[0].split('_')[1])
 
         # Read article
@@ -278,16 +279,16 @@ def write_results(out_file):
         # Generate seq-to-seq summary
         t0 = time.time()
         spacy_article = doc.spacy_text()
-        seq_to_seq_summary, score, llh = generate_summary(spacy_article)
+        seq_to_seq_summary, score = generate_summary(spacy_article)
         seq_to_seq_summary = seq_to_seq_summary.encode('utf-8')
 
         print '####################'
         print seq_to_seq_summary
-        print time.time() - t0, score, llh
+        print time.time() - t0, score
 
         # Write all results together
         out.write('\t'.join([
-            reference_summary, lexrank_summary, seq_to_seq_summary, str(llh)
+            reference_summary, lexrank_summary, seq_to_seq_summary, str(score)
         ]) + '\n')
         out.flush()
 

@@ -47,8 +47,6 @@ class Hypothesis(object):
         self.attn_dists = attn_dists
         self.p_gens = p_gens
         self.coverage = coverage
-        # caches score for hypothesis
-        self._scores = {}
 
 
     def extend(self, token, token_string, log_prob, state, attn_dist, p_gen, coverage):
@@ -100,10 +98,6 @@ class Hypothesis(object):
         Returns:
             total_score: Float.
         """
-        if is_complete in self._scores:
-            # Score is already computed.
-            return self._scores[is_complete]
-
         total_score = 0.
 
         if self._is_early_malformed(vocab_size, key_token_ids['stop'], key_token_ids['comma']):
@@ -122,6 +116,7 @@ class Hypothesis(object):
             p if st != '.' else 0. for p, st in zip(self.p_gens, self.token_strings[1:])
         ])
 
+        # Encourage entities among the first 15 tokens
         people_score = 0.
         org_score = 0.
         for i, token in enumerate(self.tokens[:15]):
@@ -132,8 +127,6 @@ class Hypothesis(object):
 
         total_score += max(.15 * people_score, .1 * org_score)
 
-        # Save computed score
-        self._scores[is_complete] = total_score
         return total_score
 
 
@@ -180,7 +173,7 @@ def run_beam_search(
             attn_dists=[],
             p_gens=[],
             # zero vector of length attention_length
-            coverage=np.zeros([batch.enc_batch.shape[1]])
+            coverage=np.zeros([batch.enc_batch.shape[1]]),
         )
         for _ in xrange(beam_size)
     ]
@@ -290,8 +283,7 @@ def run_beam_search(
     # Return the hypothesis with highest average log prob
     best_hyp = hyps_sorted[0]
     score = best_hyp.score(vocab.size, key_token_ids, is_complete=True)
-    llh = best_hyp.mean_llh
-    return best_hyp, score, llh
+    return best_hyp, score
 
 
 def sort_hyps(hyps, vocab_size, key_token_ids, complete_hyps):
