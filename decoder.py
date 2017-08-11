@@ -52,6 +52,7 @@ def _load_model():
         # other parameters
         adagrad_init_acc=.1,
         adam_optimizer=True,
+        copy_common_loss_wt=0.,
         cov_loss_wt=1.,
         high_attn_loss_wt=0.,
         lr=.15,

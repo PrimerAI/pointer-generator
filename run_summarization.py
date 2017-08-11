@@ -55,6 +55,7 @@ tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-c
 tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
 tf.app.flags.DEFINE_float('people_loss_wt', 0., 'If set, will add a loss for people tokens.')
 tf.app.flags.DEFINE_float('high_attn_loss_wt', 0., 'If set, adds a loss for high attention on non-entity tokens.')
+tf.app.flags.DEFINE_float('copy_common_loss_wt', 0., 'If set, adds a loss for copying common words (by attention).')
 
 # Output projection weights
 tf.app.flags.DEFINE_boolean('tied_output', True, 'Whether the output matrix is a multiple of the embeddings.')

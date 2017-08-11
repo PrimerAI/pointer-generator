@@ -127,6 +127,8 @@ class Hypothesis(object):
 
         total_score += max(.15 * people_score, .1 * org_score)
 
+        total_score += .002 * max(0, len(self.tokens) - 40)
+
         return total_score
 
 
