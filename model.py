@@ -562,7 +562,7 @@ class SummarizationModel(object):
         indices = tf.stack((batch_nums, self._enc_batch_extend_vocab), axis=2) # shape (batch_size, enc_t, 2)
         shape = [self._hps.batch_size, extended_vsize]
         # list length max_dec_steps (batch_size, extended_vsize)
-        attn_dists_projected = [
+        self.attn_dists_projected = [
             tf.scatter_nd(indices, copy_dist, shape) for copy_dist in attn_dists
         ]
 
@@ -574,7 +574,7 @@ class SummarizationModel(object):
         # is junk - ignore.
         final_dists = [
             vocab_dist + copy_dist
-            for (vocab_dist, copy_dist) in zip(vocab_dists_extended, attn_dists_projected)
+            for (vocab_dist, copy_dist) in zip(vocab_dists_extended, self.attn_dists_projected)
         ]
 
         # OOV part of vocab is max_art_oov long. Not all the sequences in a batch will have
@@ -688,8 +688,8 @@ class SummarizationModel(object):
             # Calculate loss for copying a common word (according to attention)
             with tf.variable_scope('copy_common_loss'):
                 copy_common_loss = _copy_common_loss(
-                    self.attn_dists, log_dists, self._enc_batch_extend_vocab, self._padding_mask,
-                    self._vocab.size, self._hps.batch_size, self._max_art_oovs
+                    self.attn_dists_projected, log_dists, self._padding_mask, self._vocab.size,
+                    self._hps.batch_size
                 )
                 tf.summary.scalar('copy_common_loss', copy_common_loss)
                 self._copy_common_loss = hps.copy_common_loss_wt * copy_common_loss
@@ -1072,29 +1072,22 @@ def _high_attn_loss(attn_dists, padding_mask, entity_tokens):
     return _mask_and_avg(non_entity_losses, padding_mask)
 
 
-def _copy_common_loss(
-    attn_dists, log_dists, enc_batch_extend_vocab, padding_mask, vocab_size, batch_size,
-    max_art_oovs
-):
+def _copy_common_loss(attn_dists_projected, log_dists, padding_mask, vocab_size, batch_size):
     """
     Calculates a loss for copying common words according to the attention distributions.
   
     args:
-        attn_dists:
-            List of length max_dec_steps containing shape (batch_size, attn_length). The
+        attn_dists_projected:
+            List of length max_dec_steps containing shape (batch_size, extended_vsize). The
             attention distributions for each decoder timestep. 
         log_dists:
             List of length max_dec_steps containing shape (batch_size, extended_vsize). The log
             probabilities of generating each word.
-        enc_batch_extend_vocab:
-            shape (batch_size, attn_length). Article tokens with temporary article IDs.
         padding_mask:
             shape (batch_size, max_dec_steps).
         vocab_size:
             int.
         batch_size:
-            int.
-        max_art_oovs:
             int.
   
     returns:
@@ -1102,19 +1095,9 @@ def _copy_common_loss(
     """
     common_log_prob_per_step = []
 
-    # This is fiddly; we use tf.scatter_nd to do the projection.
-    batch_nums = tf.range(0, limit=batch_size) # shape (batch_size)
-    batch_nums = tf.expand_dims(batch_nums, 1) # shape (batch_size, 1)
-    attn_len = tf.shape(enc_batch_extend_vocab)[1] # number of states we attend over
-    batch_nums = tf.tile(batch_nums, [1, attn_len]) # shape (batch_size, attn_len)
-    indices = tf.stack((batch_nums, enc_batch_extend_vocab), axis=2) # shape (batch_size, enc_t, 2)
-    shape = [batch_size, vocab_size + max_art_oovs]
-
-    for attn_dist, log_dist in zip(attn_dists, log_dists):
+    for attn_dist, log_dist in zip(attn_dists_projected, log_dists):
         # (batch_size, extended_vsize)
-        attn_dist_proj = tf.scatter_nd(indices, attn_dist, shape)
-        # (batch_size, extended_vsize)
-        attn_times_log_dist = tf.multiply(attn_dist_proj, log_dist)
+        attn_times_log_dist = tf.multiply(attn_dist, log_dist)
         # (batch_size, vocab_size)
         common_word_dist = tf.slice(attn_times_log_dist, [0, 0], [batch_size, vocab_size])
         # (batch_size)
