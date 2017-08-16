@@ -35,6 +35,7 @@ def _load_model():
     )
     _hps = Hps(
         # parameters important for decoding
+        attn_only_entities=False,
         batch_size=_beam_size,
         copy_only_entities=False,
         coverage=False,

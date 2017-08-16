@@ -12,7 +12,7 @@ from tensorflow.python.ops import array_ops, math_ops, nn_ops, variable_scope
 # https://www.tensorflow.org/api_guides/python/contrib.seq2seq#Attention
 def attention_decoder(
     decoder_inputs, initial_state, encoder_states, cell, initial_state_attention=False,
-    use_coverage=False, prev_coverage=None
+    use_coverage=False, prev_coverage=None, entity_tokens=None
 ):
     """
     Args:
@@ -37,6 +37,8 @@ def attention_decoder(
         prev_coverage:
             If not None, a tensor with shape (batch_size, attn_length). The previous step's
             coverage vector. This is only not None in decode mode when using coverage.
+        entity_tokens:
+            optional tensor with shape [batch_size, attn_length]. 1 if token is an entity else 0.
   
     Returns:
         outputs:
@@ -131,6 +133,10 @@ def attention_decoder(
                     # Take softmax of e to get the attention distribution
                     # shape (batch_size, attn_length)
                     attn_dist = nn_ops.softmax(e)
+                    if entity_tokens:
+                        attn_dist *= entity_tokens
+                        attn_sum = tf.reduce_sum(attn_dist, axis=1, keep_dims=True)
+                        attn_dist /= attn_sum
 
                     # Update coverage vector
                     coverage += array_ops.reshape(attn_dist, [batch_size, -1, 1, 1])
@@ -145,6 +151,10 @@ def attention_decoder(
                     # Take softmax of e to get the attention distribution
                     # shape (batch_size, attn_length)
                     attn_dist = nn_ops.softmax(e)
+                    if entity_tokens:
+                        attn_dist *= entity_tokens
+                        attn_sum = tf.reduce_sum(attn_dist, axis=1, keep_dims=True)
+                        attn_dist /= attn_sum
 
                     if use_coverage:
                         # first step of training

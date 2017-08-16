@@ -25,6 +25,7 @@ Settings = namedtuple('Settings', (
 Hps = namedtuple('Hyperparameters', (
     'adagrad_init_acc',
     'adam_optimizer',
+    'attn_only_entities',
     'batch_size',
     'copy_common_loss_wt',
     'copy_only_entities',
@@ -447,6 +448,7 @@ class SummarizationModel(object):
             initial_state_attention=(hps.mode == "decode"),
             use_coverage=hps.coverage,
             prev_coverage=prev_coverage,
+            entity_tokens=self._entity_tokens if hps.attn_only_entities else None,
         )
 
         return outputs, out_state, attn_dists, p_gens, coverage

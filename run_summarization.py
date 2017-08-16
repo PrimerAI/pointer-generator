@@ -26,6 +26,7 @@ tf.app.flags.DEFINE_boolean('two_layer_lstm', False, 'If True, make the encoder 
 tf.app.flags.DEFINE_boolean('restrictive_embeddings', False, 'If True, then restricts word embeddings to be a linear transform of the pretrained embeddings.')
 tf.app.flags.DEFINE_integer('output_vocab_size', 0, 'If set, limits the size of the vocab for decoding.')
 tf.app.flags.DEFINE_boolean('copy_only_entities', False, 'If set, can only copy entities from the article.')
+tf.app.flags.DEFINE_boolean('attn_only_entities', False, 'If set, can only have attention on entities.')
 
 # Where to save output
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
