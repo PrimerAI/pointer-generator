@@ -85,6 +85,8 @@ Below is a list of ideas I attempted (again as of 8/7/17):
 - Ignore UNK tokens for training loss
 - Two layer encoder
 - Penalty for high attention on non-entity words
+- Restrict attention to entities
+- Penalty for generating the same word you're attending to
 
 See flags in `run_summarization.py` for how to enable these, as well as default parameters to see the (approximately best settings I found).
 
