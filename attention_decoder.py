@@ -133,7 +133,7 @@ def attention_decoder(
                     # Take softmax of e to get the attention distribution
                     # shape (batch_size, attn_length)
                     attn_dist = nn_ops.softmax(e)
-                    if entity_tokens:
+                    if entity_tokens is not None:
                         attn_dist *= entity_tokens
                         attn_sum = tf.reduce_sum(attn_dist, axis=1, keep_dims=True)
                         attn_dist /= attn_sum
@@ -151,7 +151,7 @@ def attention_decoder(
                     # Take softmax of e to get the attention distribution
                     # shape (batch_size, attn_length)
                     attn_dist = nn_ops.softmax(e)
-                    if entity_tokens:
+                    if entity_tokens is not None:
                         attn_dist *= entity_tokens
                         attn_sum = tf.reduce_sum(attn_dist, axis=1, keep_dims=True)
                         attn_dist /= attn_sum

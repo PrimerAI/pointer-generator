@@ -407,6 +407,14 @@ class Batcher(object):
                     )
 
             example = Example(article, abstract, self._vocab, self._hps)
+            if self._hps.attn_only_entities:
+                n_people_enc_tokens = sum(
+                    1 for token in example.enc_input[:self._hps.max_enc_steps]
+                    if 3 <= token < 3 + len(data.PERSON_TOKENS)
+                )
+                if n_people_enc_tokens < 2:
+                    continue
+
             self._example_queue.put(example)
 
 
