@@ -328,12 +328,40 @@ class SummarizationModel(object):
                 Each are LSTMStateTuples of shape
                 ([batch_size, enc_hidden_dim], [batch_size, enc_hidden_dim]).
         """
-        cell_fw = tf.contrib.rnn.LSTMCell(
-            self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
-        )
-        cell_bw = tf.contrib.rnn.LSTMCell(
-            self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
-        )
+        hps = self._hps 
+
+        if hps.two_layer_lstm:
+            dropout_prob = .5 if hps.mode == 'train' else 1.
+
+            cells_fw = [
+                tf.contrib.rnn.DropoutWrapper(
+                    tf.contrib.rnn.LSTMCell(
+                        hps.enc_hidden_dim, state_is_tuple=True, initializer=self.rand_unif_init
+                    ),
+                    output_keep_prob=dropout_prob,
+                )
+                for i in range(2)
+            ]
+            cell_fw = tf.contrib.rnn.MultiRNNCell(cells_fw, state_is_tuple=True)
+
+            cells_bw = [
+                tf.contrib.rnn.DropoutWrapper(
+                    tf.contrib.rnn.LSTMCell(
+                        hps.enc_hidden_dim, state_is_tuple=True, initializer=self.rand_unif_init
+                    ),
+                    output_keep_prob=dropout_prob,
+                )
+                for i in range(2)
+            ]
+            cell_bw = tf.contrib.rnn.MultiRNNCell(cells_bw, state_is_tuple=True)
+
+        else:
+            cell_fw = tf.contrib.rnn.LSTMCell(
+                hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
+            )
+            cell_bw = tf.contrib.rnn.LSTMCell(
+                hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
+            )
 
         encoder_outputs, (fw_st, bw_st) = tf.nn.bidirectional_dynamic_rnn(
             cell_fw, cell_bw, encoder_inputs, dtype=tf.float32, sequence_length=seq_len,
@@ -342,21 +370,12 @@ class SummarizationModel(object):
         # concatenate the forwards and backwards states
         encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
 
-        if self._hps.two_layer_lstm:
-            # Run one more bidirectional rnn that takes in the concatenated outputs of the
-            # previous rnn as input.
-            cell_fw_top = tf.contrib.rnn.LSTMCell(
-                self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
-            )
-            cell_bw_top = tf.contrib.rnn.LSTMCell(
-                self._hps.enc_hidden_dim, initializer=self.rand_unif_init, state_is_tuple=True
-            )
-            encoder_outputs, (fw_st, bw_st) = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw_top, cell_bw_top, encoder_outputs, dtype=tf.float32,
-                sequence_length=seq_len, swap_memory=True, scope='layer_two'
-            )
-            # concatenate the forwards and backwards states
-            encoder_outputs = tf.concat(axis=2, values=encoder_outputs)
+        if hps.two_layer_lstm:
+            assert len(fw_st) == 2
+            assert len(bw_st) == 2
+            # just return final states of top layer
+            fw_st = fw_st[1]
+            bw_st = bw_st[1]
 
         return encoder_outputs, fw_st, bw_st
 
@@ -424,9 +443,13 @@ class SummarizationModel(object):
         """
         hps = self._hps
         if hps.two_layer_lstm:
+            dropout_prob = .5 if hps.mode == 'train' else 1.
             cells = [
-                tf.contrib.rnn.LSTMCell(
-                    hps.dec_hidden_dim, state_is_tuple=True, initializer=self.rand_unif_init
+                tf.contrib.rnn.DropoutWrapper(
+                    tf.contrib.rnn.LSTMCell(
+                        hps.dec_hidden_dim, state_is_tuple=True, initializer=self.rand_unif_init
+                    ),
+                    output_keep_prob=dropout_prob,
                 )
                 for i in range(2)
             ]
