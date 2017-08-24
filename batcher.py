@@ -170,6 +170,7 @@ class Batch(object):
         self.init_encoder_seq(example_list, hps)
         self.init_decoder_seq(example_list, hps)
         self.store_orig_strings(example_list)
+        self.vocab = vocab
 
 
     def init_encoder_seq(self, example_list, hps):

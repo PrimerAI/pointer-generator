@@ -50,8 +50,7 @@ tf.app.flags.DEFINE_float('max_grad_norm', 2.0, 'for gradient clipping')
 
 # Training hyperparameters
 tf.app.flags.DEFINE_boolean('adam_optimizer', False, 'Use Adam optimizer instead of Adagrad.')
-tf.app.flags.DEFINE_boolean('coverage', False, 'Use coverage mechanism. Note, the experiments reported in the ACL paper train WITHOUT coverage until converged, and then train for a short phase WITH coverage afterwards. i.e. to reproduce the results in the ACL paper, turn this off for most of training then turn on for a short phase at the end.')
-tf.app.flags.DEFINE_float('cov_loss_wt', 1.0, 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
+tf.app.flags.DEFINE_float('cov_loss_wt', 0., 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
 tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-coverage model to a coverage model. Turn this on and run in train mode. Your current model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
 tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
 tf.app.flags.DEFINE_float('people_loss_wt', 0., 'If set, will add a loss for people tokens.')
@@ -183,9 +182,9 @@ def setup_training(model, batcher, hps, vocab_size):
     with default_device:
         model.build_graph() # build the graph
         if FLAGS.convert_to_coverage_model:
-            assert FLAGS.coverage, (
+            assert FLAGS.cov_loss_wt, (
                 "To convert your non-coverage model to a coverage model, run with "
-                "convert_to_coverage_model=True and coverage=True"
+                "convert_to_coverage_model=True and cov_loss_wt=1"
             )
             convert_to_coverage_model()
         if FLAGS.convert_matmul:
@@ -219,7 +218,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
     """
     tf.logging.info("starting run_training")
     with sess_context_manager as sess:
-        while True: # repeats until interrupted
+        for i in range(200):
             batch = batcher.next_batch()
 
             tf.logging.info('running training step...')
@@ -230,7 +229,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
 
             loss = results['loss']
             tf.logging.info('loss: %f', loss) # print the loss to screen
-            if FLAGS.coverage:
+            if FLAGS.cov_loss_wt:
                 coverage_loss = results['coverage_loss']
                 tf.logging.info("coverage_loss: %f", coverage_loss) # print the coverage loss to screen
 
@@ -270,7 +269,7 @@ def run_eval(model, batcher, vocab, seconds_per_eval=20):
         # print the loss and coverage loss to screen
         loss = results['loss']
         tf.logging.info('loss: %f', loss)
-        if FLAGS.coverage:
+        if FLAGS.cov_loss_wt:
             coverage_loss = results['coverage_loss']
             tf.logging.info("coverage_loss: %f", coverage_loss)
 

@@ -12,7 +12,7 @@ from tensorflow.contrib.tensorboard.plugins import projector
 from tensorflow.python.client import timeline
 
 from attention_decoder import attention_decoder
-from data import N_FREE_TOKENS, N_IMPORTANT_TOKENS, START_DECODING
+from data import N_FREE_TOKENS, N_IMPORTANT_TOKENS, START_DECODING, outputid_to_word
 
 
 Settings = namedtuple('Settings', (
@@ -30,7 +30,6 @@ Hps = namedtuple('Hyperparameters', (
     'copy_common_loss_wt',
     'copy_only_entities',
     'cov_loss_wt',
-    'coverage',
     'dec_hidden_dim',
     'emb_dim',
     'enc_hidden_dim',
@@ -114,7 +113,7 @@ class SummarizationModel(object):
         self._people_lens = tf.placeholder(tf.int32, [hps.batch_size], name='people_lens')
         self._people_ids = tf.placeholder(tf.int32, [hps.batch_size, None], name='people_ids')
 
-        if hps.mode == "decode" and hps.coverage:
+        if hps.mode == "decode" and hps.cov_loss_wt:
             self.prev_coverage = tf.placeholder(
                 tf.float32, [hps.batch_size, None], name='prev_coverage'
             )
@@ -331,7 +330,7 @@ class SummarizationModel(object):
         hps = self._hps 
 
         if hps.two_layer_lstm:
-            dropout_prob = .5 if hps.mode == 'train' else 1.
+            dropout_prob = .75 if hps.mode == 'train' else 1.
 
             cells_fw = [
                 tf.contrib.rnn.DropoutWrapper(
@@ -443,7 +442,7 @@ class SummarizationModel(object):
         """
         hps = self._hps
         if hps.two_layer_lstm:
-            dropout_prob = .5 if hps.mode == 'train' else 1.
+            dropout_prob = .75 if hps.mode == 'train' else 1.
             cells = [
                 tf.contrib.rnn.DropoutWrapper(
                     tf.contrib.rnn.LSTMCell(
@@ -461,7 +460,7 @@ class SummarizationModel(object):
 
         # In decode mode, we run attention_decoder one step at a time and so need to pass in the
         # previous step's coverage vector each time
-        prev_coverage = self.prev_coverage if hps.mode == "decode" and hps.coverage else None
+        prev_coverage = self.prev_coverage if hps.mode == "decode" and hps.cov_loss_wt else None
 
         outputs, out_state, attn_dists, p_gens, coverage = attention_decoder(
             inputs,
@@ -469,7 +468,7 @@ class SummarizationModel(object):
             self._enc_states,
             cell,
             initial_state_attention=(hps.mode == "decode"),
-            use_coverage=hps.coverage,
+            use_coverage=hps.cov_loss_wt,
             prev_coverage=prev_coverage,
             entity_tokens=self._entity_tokens if hps.attn_only_entities else None,
         )
@@ -629,9 +628,7 @@ class SummarizationModel(object):
         hps = self._hps
 
         # Will be list length max_dec_steps containing shape (batch_size).
-        loss_per_step = []
-        # Will be list length max_dec_steps containing shape (batch_size).
-        incorrect_people_loss_per_step = []
+        self.loss_per_step = []
         batch_nums = tf.range(0, limit=hps.batch_size) # shape (batch_size)
 
         for dec_step, log_dist in enumerate(log_dists):
@@ -641,88 +638,50 @@ class SummarizationModel(object):
             indices = tf.stack((batch_nums, targets), axis=1)
             # shape (batch_size). loss on this step for each batch
             losses = tf.gather_nd(-log_dist, indices)
-            loss_per_step.append(losses)
-
-            if hps.people_loss_wt:
-                incorrect_people_loss_per_batch = []
-                for batch_num in range(hps.batch_size):
-                    batch_people_len = self._people_lens[batch_num]
-                    # Indices of all people for this batch. shape (batch_people_len)
-                    batch_people_ids = self._people_ids[batch_num, :batch_people_len]
-                    # shape (batch_people_len)
-                    batch_indices = batch_num * tf.ones_like(
-                        batch_people_ids, dtype=tf.int32
-                    )
-                    # shape (batch_people_len, 2)
-                    people_loss_indices = tf.stack(
-                        (batch_indices, batch_people_ids), axis=1
-                    )
-                    # shape (batch_people_len)
-                    people_losses = tf.gather_nd(-log_dist, people_loss_indices)
-                    # shape ()
-                    people_losses = tf.reduce_mean(people_losses)
-                    # convert nan to 0 if necessary.
-                    people_losses = tf.where(
-                        tf.is_nan(people_losses),
-                        tf.zeros_like(people_losses),
-                        people_losses
-                    )
-                    incorrect_people_loss_per_batch.append(people_losses)
-                incorrect_people_loss_per_step.append(incorrect_people_loss_per_batch)
+            self.loss_per_step.append(losses)
 
         # Apply padding_mask mask and get loss
-        self._output_loss = _mask_and_avg(loss_per_step, self._padding_mask)
+        self._output_loss = _mask_and_avg(self.loss_per_step, self._padding_mask)
         tf.summary.scalar('loss', self._output_loss)
 
-        self._people_loss = 0.
-        self._coverage_loss = 0.
-        self._high_attn_loss = 0.
-        self._copy_common_loss = 0.
+        self._total_loss = self._output_loss
 
-        if hps.people_loss_wt:
-            # Calculate people losses
-            with tf.variable_scope('people_loss'):
-                correct_people_loss = _mask_and_avg(
-                    loss_per_step, self._padding_mask_people, equal_wt_per_ex=False
-                )
-                other_people_loss = _mask_and_avg(
-                    incorrect_people_loss_per_step, self._padding_mask_people,
-                    equal_wt_per_ex=False
-                )
-                people_loss = .1 * correct_people_loss - .1 * other_people_loss
-                tf.summary.scalar('people_loss', people_loss)
-                self._people_loss = hps.people_loss_wt * people_loss
-
-        if hps.coverage:
-            # Calculate coverage loss from the attention distributions
-            with tf.variable_scope('coverage_loss'):
-                coverage_loss = _coverage_loss(self.attn_dists, self._padding_mask)
-                tf.summary.scalar('coverage_loss', coverage_loss)
-                self._coverage_loss = hps.cov_loss_wt * coverage_loss
-
-        if hps.high_attn_loss_wt:
-            # Calculate loss for high attention to non-entity words
-            with tf.variable_scope('high_attn_loss'):
-                high_attn_loss = _high_attn_loss(
-                    self.attn_dists, self._padding_mask, self._entity_tokens
-                )
-                tf.summary.scalar('high_attn_loss', high_attn_loss)
-                self._high_attn_loss = hps.high_attn_loss_wt * high_attn_loss
-
-        if hps.copy_common_loss_wt:
-            # Calculate loss for copying a common word (according to attention)
-            with tf.variable_scope('copy_common_loss'):
-                copy_common_loss = _copy_common_loss(
+        for name, value, weight in (
+            (
+                'people_loss',
+                _people_loss(
+                    log_dists, self.loss_per_step, self._people_lens, self._people_ids,
+                    self._padding_mask_people, hps.batch_size
+                ),
+                hps.people_loss_wt,
+            ),
+            (
+                'coverage_loss',
+                _coverage_loss(self.attn_dists, self._padding_mask),
+                hps.cov_loss_wt,
+            ),
+            (
+                'high_attn_loss',
+                _high_attn_loss(self.attn_dists, self._padding_mask, self._entity_tokens),
+                hps.high_attn_loss_wt,
+            ),
+            (
+                'copy_common_loss',
+                _copy_common_loss(
                     self.attn_dists_projected, log_dists, self._padding_mask, self._vocab.size,
                     self._hps.batch_size
-                )
-                tf.summary.scalar('copy_common_loss', copy_common_loss)
-                self._copy_common_loss = hps.copy_common_loss_wt * copy_common_loss
+                ),
+                hps.copy_common_loss_wt,
+            ),
+        ):
+            if weight:
+                with tf.variable_scope(name):
+                    tf.summary.scalar(name, value)
+                    setattr(self, '_%s' % name, weight * value)
+            else:
+                setattr(self, '_%s' % name, 0.)
 
-        self._total_loss = (
-            self._output_loss + self._people_loss + self._coverage_loss + self._high_attn_loss +
-            self._copy_common_loss
-        )
+            self._total_loss += weight * value
 
 
     def _add_train_op(self):
@@ -753,15 +712,30 @@ class SummarizationModel(object):
         )
 
 
-    def run_train_step(self, sess, batch, use_generated_inputs):
+    def run_train_step(self, sess, batch, use_generated_inputs, print_candidates=False):
         """
         Runs one training iteration. Returns a dictionary containing train op, summaries, loss,
         global_step and (optionally) coverage loss.
         """
         feed_dict, to_return = self._get_train_step_feed_return(
-            batch, get_outputs=use_generated_inputs
+            batch, get_outputs=(use_generated_inputs or print_candidates)
         )
+        to_return['loss_per_step'] = self.loss_per_step
         results = sess.run(to_return, feed_dict)
+
+        if print_candidates:
+            for i in range(self._hps.batch_size):
+                print '#############################'
+                text = batch.original_abstracts[i].split()
+                for j, word in enumerate(text[:self._hps.max_dec_steps]):
+                    candidates = [
+                        outputid_to_word(results['top_k_ids'][j, i, c], batch.vocab, batch.art_oovs[i])
+                        for c in range(3)
+                    ]
+                    scores = [str(results['top_k_log_probs'][j, i, c]) for c in range(3)]
+                    candidates = ' | '.join([str(tup) for tup in zip(candidates, scores)])
+                    print word, results['loss_per_step'][j][i], '|', candidates
+
         if not use_generated_inputs:
             return results
 
@@ -778,7 +752,7 @@ class SummarizationModel(object):
 
         tf.logging.info('seconds for training step with generated input: %.3f', time.time() - t0)
         tf.logging.info('generated-input loss: %f', results_generated['loss'])
-        if self._hps.coverage:
+        if self._hps.cov_loss_wt:
             tf.logging.info("generated-input coverage_loss: %f", results_generated['coverage_loss'])
 
         return results
@@ -823,7 +797,7 @@ class SummarizationModel(object):
             'loss': self._output_loss,
             'global_step': self.global_step,
         }
-        if self._hps.coverage:
+        if self._hps.cov_loss_wt:
             to_return['coverage_loss'] = self._coverage_loss
             to_return['attn_dists'] = self.attn_dists
         if get_outputs:
@@ -844,7 +818,7 @@ class SummarizationModel(object):
             'loss': self._output_loss,
             'global_step': self.global_step,
         }
-        if self._hps.coverage:
+        if self._hps.cov_loss_wt:
             to_return['coverage_loss'] = self._coverage_loss
         return sess.run(to_return, feed_dict)
 
@@ -965,7 +939,7 @@ class SummarizationModel(object):
             "p_gens": self.p_gens,
         }
 
-        if self._hps.coverage:
+        if self._hps.cov_loss_wt:
             feed[self.prev_coverage] = np.stack(prev_coverage, axis=0)
             to_return['coverage'] = self.coverage
 
@@ -1013,7 +987,7 @@ class SummarizationModel(object):
 
         # Convert the coverage tensor to a list length k containing the coverage vector for each
         # hypothesis.
-        if self._hps.coverage:
+        if self._hps.cov_loss_wt:
             new_coverage = results['coverage'].tolist()
             assert len(new_coverage) == beam_size
         else:
@@ -1072,6 +1046,68 @@ def _coverage_loss(attn_dists, padding_mask):
         coverage += a
 
     return _mask_and_avg(covlosses, padding_mask)
+
+
+def _people_loss(
+    log_dists, loss_per_step, people_lens, people_ids, padding_mask_people, batch_size
+):
+    """
+    Calculates a loss to get the people tokens correct. In particular, is the log_prob of the
+    correct person minus the average log_prob of the other possible people tokens at the people
+    tokens in the summary.
+    
+    args:
+        log_dists: List length max_dec_steps of shape (batch_size, extended_vsize)
+        loss_per_step: List length max_dec_steps of shape (batch_size)
+        people_lens: Tensor of shape (batch_size)
+        people_ids: Tensor of shape (batch_size, people_lens)
+        padding_mask_people: Tensor of shape (batch_size, max_dec_steps)
+        batch_size: Integer
+        
+    returns:
+        people_loss: scalar
+    """
+    # Will be list length max_dec_steps containing shape (batch_size).
+    incorrect_people_loss_per_step = []
+
+    for dec_step, log_dist in enumerate(log_dists):
+        incorrect_people_loss_per_batch = []
+
+        for batch_num in range(batch_size):
+            batch_people_len = people_lens[batch_num]
+            # Indices of all people for this batch. shape (batch_people_len)
+            batch_people_ids = people_ids[batch_num, :batch_people_len]
+            # shape (batch_people_len)
+            batch_indices = batch_num * tf.ones_like(
+                batch_people_ids, dtype=tf.int32
+            )
+            # shape (batch_people_len, 2)
+            people_loss_indices = tf.stack(
+                (batch_indices, batch_people_ids), axis=1
+            )
+            # shape (batch_people_len)
+            people_losses = tf.gather_nd(-log_dist, people_loss_indices)
+            # shape ()
+            people_losses = tf.reduce_mean(people_losses)
+            # convert nan to 0 if necessary.
+            people_losses = tf.where(
+                tf.is_nan(people_losses),
+                tf.zeros_like(people_losses),
+                people_losses
+            )
+            incorrect_people_loss_per_batch.append(people_losses)
+
+        incorrect_people_loss_per_step.append(incorrect_people_loss_per_batch)
+
+    correct_people_loss = _mask_and_avg(
+        loss_per_step, padding_mask_people, equal_wt_per_ex=False
+    )
+    other_people_loss = _mask_and_avg(
+        incorrect_people_loss_per_step, padding_mask_people, equal_wt_per_ex=False
+    )
+    people_loss = .1 * correct_people_loss - .1 * other_people_loss
+
+    return people_loss
 
 
 def _high_attn_loss(attn_dists, padding_mask, entity_tokens):
