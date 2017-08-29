@@ -8,7 +8,7 @@ from collections import defaultdict
 
 import data
 from nltk.tokenize.moses import MosesDetokenizer
-from primer_core.entities.people.resolver import SpacyPeopleResolver
+from primer_core.nlp.entities.people.resolver import SpacyPeopleResolver
 
 
 assert all(token[0] == '[' and token[-1] == ']' for token in data.ENTITY_TOKENS + data.POS_TOKENS)
