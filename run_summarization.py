@@ -22,11 +22,6 @@ tf.app.flags.DEFINE_string('embeddings_path', '', 'For the start of training, if
 # Important settings
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/decode')
 tf.app.flags.DEFINE_boolean('single_pass', False, 'For decode mode only. If True, run eval on the full dataset using a fixed checkpoint, i.e. take the current checkpoint, and use it to produce one summary for each example in the dataset, write the summaries to file and then get ROUGE scores for the whole dataset. If False (default), run concurrent decoding, i.e. repeatedly load latest checkpoint, use it to produce summaries for randomly-chosen examples and log the results to screen, indefinitely.')
-tf.app.flags.DEFINE_boolean('two_layer_lstm', False, 'If True, make the encoder and decoder use two-layer bi-directional LSTMs.')
-tf.app.flags.DEFINE_boolean('restrictive_embeddings', False, 'If True, then restricts word embeddings to be a linear transform of the pretrained embeddings.')
-tf.app.flags.DEFINE_integer('output_vocab_size', 0, 'If set, limits the size of the vocab for decoding.')
-tf.app.flags.DEFINE_boolean('copy_only_entities', False, 'If set, can only copy entities from the article.')
-tf.app.flags.DEFINE_boolean('attn_only_entities', False, 'If set, can only have attention on entities.')
 
 # Where to save output
 tf.app.flags.DEFINE_string('log_root', '', 'Root directory for all logging.')
@@ -48,17 +43,26 @@ tf.app.flags.DEFINE_float('rand_unif_init_mag', 0.02, 'magnitude for lstm cells 
 tf.app.flags.DEFINE_float('trunc_norm_init_std', 1e-4, 'std of trunc norm init, used for initializing everything else')
 tf.app.flags.DEFINE_float('max_grad_norm', 2.0, 'for gradient clipping')
 
+# Model configurations
+tf.app.flags.DEFINE_boolean('two_layer_lstm', False, 'If True, make the encoder and decoder use two-layer bi-directional LSTMs.')
+tf.app.flags.DEFINE_boolean('restrictive_embeddings', False, 'If True, then restricts word embeddings to be a linear transform of the pretrained embeddings.')
+tf.app.flags.DEFINE_integer('output_vocab_size', 0, 'If set, limits the size of the vocab for decoding.')
+tf.app.flags.DEFINE_boolean('copy_only_entities', False, 'If set, can only copy entities from the article.')
+tf.app.flags.DEFINE_boolean('attn_only_entities', False, 'If set, can only have attention on entities.')
+tf.app.flags.DEFINE_boolean('tied_output', True, 'Whether the output matrix is a multiple of the embeddings.')
+
 # Training hyperparameters
 tf.app.flags.DEFINE_boolean('adam_optimizer', False, 'Use Adam optimizer instead of Adagrad.')
 tf.app.flags.DEFINE_float('cov_loss_wt', 0., 'Weight of coverage loss (lambda in the paper). If zero, then no incentive to minimize coverage loss.')
-tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-coverage model to a coverage model. Turn this on and run in train mode. Your current model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
 tf.app.flags.DEFINE_boolean('corrective_training', False, 'If True, then will feed a generated output from the model as input as 1 / 5 of the training samples.')
 tf.app.flags.DEFINE_float('people_loss_wt', 0., 'If set, will add a loss for people tokens.')
 tf.app.flags.DEFINE_float('high_attn_loss_wt', 0., 'If set, adds a loss for high attention on non-entity tokens.')
 tf.app.flags.DEFINE_float('copy_common_loss_wt', 0., 'If set, adds a loss for copying common words (by attention).')
+tf.app.flags.DEFINE_float('sharp_loss_wt', 0., 'If set, adds a squared log-prob loss.')
+tf.app.flags.DEFINE_float('scatter_loss_wt', 0., 'If set, adds a squared-prob loss for wrong candidates.')
 
-# Output projection weights
-tf.app.flags.DEFINE_boolean('tied_output', True, 'Whether the output matrix is a multiple of the embeddings.')
+# Reloading configurations
+tf.app.flags.DEFINE_boolean('convert_to_coverage_model', False, 'Convert a non-coverage model to a coverage model. Turn this on and run in train mode. Your current model will be copied to a new version (same name with _cov_init appended) that will be ready to run with coverage flag turned on, for the coverage training stage.')
 tf.app.flags.DEFINE_boolean('convert_matmul', False, 'Convert to saved matmul model.')
 tf.app.flags.DEFINE_boolean('save_matmul', False, 'Use matmul model.')
 

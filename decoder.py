@@ -59,6 +59,8 @@ def _load_model():
         max_grad_norm=2.,
         people_loss_wt=0.,
         rand_unif_init_mag=.02,
+        scatter_loss_wt=0.,
+        sharp_loss_wt=0.,
         trunc_norm_init_std=1e-4,
     )
 

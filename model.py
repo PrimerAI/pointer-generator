@@ -44,6 +44,8 @@ Hps = namedtuple('Hyperparameters', (
     'rand_unif_init_mag',
     'restrictive_embeddings',
     'save_matmul',
+    'scatter_loss_wt',
+    'sharp_loss_wt',
     'tied_output',
     'trunc_norm_init_std',
     'two_layer_lstm',
@@ -646,10 +648,11 @@ class SummarizationModel(object):
 
         self._total_loss = self._output_loss
 
-        for name, value, weight in (
+        for name, calc_func, args, weight in (
             (
                 'people_loss',
-                _people_loss(
+                _people_loss,
+                (
                     log_dists, self.loss_per_step, self._people_lens, self._people_ids,
                     self._padding_mask_people, hps.batch_size
                 ),
@@ -657,30 +660,44 @@ class SummarizationModel(object):
             ),
             (
                 'coverage_loss',
-                _coverage_loss(self.attn_dists, self._padding_mask),
+                _coverage_loss,
+                (self.attn_dists, self._padding_mask),
                 hps.cov_loss_wt,
             ),
             (
                 'high_attn_loss',
-                _high_attn_loss(self.attn_dists, self._padding_mask, self._entity_tokens),
+                _high_attn_loss,
+                (self.attn_dists, self._padding_mask, self._entity_tokens),
                 hps.high_attn_loss_wt,
             ),
             (
                 'copy_common_loss',
-                _copy_common_loss(
+                _copy_common_loss,
+                (
                     self.attn_dists_projected, log_dists, self._padding_mask, self._vocab.size,
                     self._hps.batch_size
                 ),
                 hps.copy_common_loss_wt,
             ),
+            (
+                'sharp_loss',
+                _sharp_loss,
+                (self.loss_per_step, self._padding_mask),
+                hps.sharp_loss_wt,
+            ),
+            (
+                'scatter_loss',
+                _scatter_loss,
+                (log_dists, self._padding_mask, hps.batch_size, self._target_batch),
+                hps.scatter_loss_wt,
+            ),
         ):
-            if weight:
-                with tf.variable_scope(name):
-                    tf.summary.scalar(name, value)
-                    setattr(self, '_%s' % name, weight * value)
-            else:
-                setattr(self, '_%s' % name, 0.)
+            if not weight:
+                continue
 
+            value = calc_func(*args)
+            tf.summary.scalar(name, value)
+            setattr(self, '_%s' % name, weight * value)
             self._total_loss += weight * value
 
 
@@ -718,9 +735,8 @@ class SummarizationModel(object):
         global_step and (optionally) coverage loss.
         """
         feed_dict, to_return = self._get_train_step_feed_return(
-            batch, get_outputs=(use_generated_inputs or print_candidates)
+            batch, get_outputs=use_generated_inputs, print_candidates=print_candidates
         )
-        to_return['loss_per_step'] = self.loss_per_step
         results = sess.run(to_return, feed_dict)
 
         if print_candidates:
@@ -784,7 +800,9 @@ class SummarizationModel(object):
         return output_ids
 
 
-    def _get_train_step_feed_return(self, batch, get_outputs, output_ids=None):
+    def _get_train_step_feed_return(
+        self, batch, get_outputs, output_ids=None, print_candidates=False
+    ):
         """
         Specify input and output of a training step.
         """
@@ -800,9 +818,13 @@ class SummarizationModel(object):
         if self._hps.cov_loss_wt:
             to_return['coverage_loss'] = self._coverage_loss
             to_return['attn_dists'] = self.attn_dists
-        if get_outputs:
+
+        if get_outputs or print_candidates:
             to_return['top_k_ids'] = self._topk_ids
             to_return['top_k_log_probs'] = self._topk_log_probs
+
+        if print_candidates:
+            to_return['loss_per_step'] = self.loss_per_step
 
         return feed_dict, to_return
 
@@ -1168,4 +1190,57 @@ def _copy_common_loss(attn_dists_projected, log_dists, padding_mask, vocab_size,
     return _mask_and_avg(common_log_prob_per_step, padding_mask)
 
 
+def _sharp_loss(loss_per_step, padding_mask):
+    """
+    Calculates a squared-log-prob loss, to upweight hard words. Capped by a linear function above
+    a certain point.
+    
+    args:
+        loss_per_step: List of length max_dec_steps containing shape (batch_size, extended_vsize)
+        padding_mask: shape (batch_size, max_dec_steps)
+    
+    returns:
+        sharp_loss: scalar
+    """
+    squared_loss = [tf.square(loss_batch) for loss_batch in loss_per_step]
+    sharp_loss = [
+        tf.minimum(square_loss, 6. * loss)
+        for square_loss, loss in zip(squared_loss, loss_per_step)
+    ]
+    return _mask_and_avg(sharp_loss, padding_mask)
 
+
+def _scatter_loss(log_dists, padding_mask, batch_size, target_batch):
+    """
+    Calculates a loss for the whole distribution of words. Wants to reduce the probability of other
+    top word choices, so that the correct one looks relatively better. Penalizes squared
+    probabilities.
+    
+    args:
+        log_dists: List length max_dec_steps of (batch_size, extended_vsize)
+        padding_mask: Tensor of shape (batch_size, max_dec_steps)
+        batch_size: Integer
+        target_batch: Tensor of shape (batch_size, max_dec_steps)
+        
+    returns:
+        scatter_loss: scalar
+    """
+    # Will be list length max_dec_steps containing shape (batch_size).
+    squared_probs_per_step = []
+    batch_nums = tf.range(0, limit=batch_size) # shape (batch_size)
+
+    for dec_step, log_dist in enumerate(log_dists):
+        prob_dist = tf.exp(log_dist)
+        squared_dist = tf.square(prob_dist)
+
+        # The indices of the target words. shape (batch_size)
+        targets = target_batch[:, dec_step]
+        # shape (batch_size, 2)
+        indices = tf.stack((batch_nums, targets), axis=1)
+        # shape (batch_size)
+        correct_squared_probs = tf.gather_nd(squared_dist, indices)
+
+        squared_probs_batch = tf.reduce_sum(squared_dist, axis=1) - correct_squared_probs
+        squared_probs_per_step.append(squared_probs_batch)
+
+    return 10. * _mask_and_avg(squared_probs_per_step, padding_mask)

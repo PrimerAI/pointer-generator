@@ -10,11 +10,11 @@ from tensorflow.core.example import example_pb2
 import time
 
 from data import N_FREE_TOKENS, Vocab
-from decoder import generate_summary
-#from primer_core.nlp.seq2seq_summarization.decoder import generate_summary
 from make_datafiles import get_art_abs
-from pygov.analytic_pipeline.common.summary import compute_summaries
-from pygov.analytic_pipeline.document_pipeline import SingleDocument
+from primer_core.analytic_pipelines.base.document_pipeline import SingleDocument
+from primer_core.nlp.summary.lexrank.summary import compute_summaries
+#from decoder import generate_summary
+from primer_core.nlp.summary.seq2seq.decoder import generate_summary
 
 
 ######################################################

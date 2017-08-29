@@ -12,7 +12,7 @@ from tensorflow.core.example import example_pb2
 from data import ENTITY_TOKENS, POS_TOKENS
 from io_processing import process_article
 from primer_core.nlp.get_spacy import get_spacy
-from pygov.analytic_pipeline.document_pipeline import SingleDocument
+from primer_core.analytic_pipelines.base.document_pipeline import SingleDocument
 
 # acceptable ways to end a sentence
 REQUIRED_END_MARKERS = ('.', '!', '?')
