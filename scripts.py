@@ -1,3 +1,7 @@
+import reproducible
+reproducible.add_non_git_file('results/articles/article_0.txt')
+reproducible.write_fingerprint()
+
 import json
 import numpy as np
 import os
@@ -13,8 +17,7 @@ from data import N_FREE_TOKENS, Vocab
 from make_datafiles import get_art_abs
 from primer_core.analytic_pipelines.base.document_pipeline import SingleDocument
 from primer_core.nlp.summary.lexrank.summary import compute_summaries
-#from decoder import generate_summary
-from primer_core.nlp.summary.seq2seq.decoder import generate_summary
+from decoder import generate_summary
 
 
 ######################################################
@@ -284,7 +287,7 @@ def write_results(out_file):
 
         print '####################'
         print seq_to_seq_summary
-        print time.time() - t0, score
+        print 'Time:', time.time() - t0, '| Score:', score
 
         # Write all results together
         out.write('\t'.join([

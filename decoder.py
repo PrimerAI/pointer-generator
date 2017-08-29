@@ -39,8 +39,8 @@ def _load_model():
         batch_size=_beam_size,
         copy_only_entities=False,
         emb_dim=128,
-        enc_hidden_dim=256,
-        dec_hidden_dim=400,
+        enc_hidden_dim=200,
+        dec_hidden_dim=300,
         max_dec_steps=1,
         max_enc_steps=400,
         mode='decode',
@@ -48,7 +48,7 @@ def _load_model():
         restrictive_embeddings=False,
         save_matmul=False,
         tied_output=True,
-        two_layer_lstm=False,
+        two_layer_lstm=True,
         # other parameters
         adagrad_init_acc=.1,
         adam_optimizer=True,
@@ -97,7 +97,6 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
     assert isinstance(spacy_article, Doc)
 
     # These imports are slow - lazy import.
-    import time
     from batcher import Batch, Example
     from beam_search import run_beam_search
     from io_processing import process_article, process_output
@@ -106,9 +105,7 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
         _load_model()
 
     # Handle short inputs
-    t0 = time.time()
     article_tokens, _, orig_article_tokens = process_article(spacy_article)
-    print 'processing input', time.time() - t0
     if len(article_tokens) <= ideal_summary_length_tokens:
         return spacy_article.text, 0.
 
@@ -120,12 +117,10 @@ def generate_summary(spacy_article, ideal_summary_length_tokens=60):
     batch = Batch([example] * _beam_size, _hps, _vocab)
 
     # Generate output
-    t1 = time.time()
     hyp, score = run_beam_search(
         _sess, _model, _vocab, batch, _beam_size, max_summary_length, min_summary_length,
         _settings.trace_path,
     )
-    print 'beam search', time.time() - t1
 
     # Extract the output ids from the hypothesis and convert back to words
     return process_output(hyp.token_strings[1:], orig_article_tokens), score
