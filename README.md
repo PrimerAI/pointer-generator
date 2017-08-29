@@ -52,19 +52,23 @@ To train a model, run
 python run_summarization.py --mode={train, eval, decode} --data_path=/path/to/chunked/train_* --vocab_path=/path/to/vocab --log_root=/path/to/a/log/directory --exp_name=myexperiment
 ```
 
-There are a ton of other configurations / variants / features - see run_summarization.py for the full list of FLAGS. The default parameters are pretty good (the model saved in `model_parameters` was trained with the default parameters except with `adam_optimizer` enabled and a `embeddings_path` given).
+There are a ton of other configurations / variants / features - see run_summarization.py for the full list of FLAGS. The default parameters are pretty good (the model saved in `model_parameters` was trained with the default parameters, with the exception of:
 
-You can view training progress using `tensorboard --logdir=/path/to/log/directory`. Training loss on the CNN / Dailymail data set typically converges at around 2.75 and on the combined CNN / Dailymail / new cables data set converges at around 3.0. It's also a good idea to run the `run_summarization.py` script with `mode=eval`, to see the loss on an evaluation data set.
+- `--adam_optimizer=1`
+- `--embeddings_path=/path/to/pretrained/embeddings`
+- `--two_layer_lstm=1`
+
+You can view training progress using `tensorboard --logdir=/path/to/log/directory`. Training loss on the CNN / Dailymail data set typically converges at around 2.8 and on the combined CNN / Dailymail / new cables data set converges at around 3.0. It's also a good idea to concurrently run the `run_summarization.py` script with `mode=eval`, to see the loss on an evaluation data set.
 
 Training can take between half a day to three days (or more!) depending on the configuration. For faster training, it's recommended to begin training with smaller values for `max_enc_steps` and `max_dec_steps` (say 150 and 75) before gradually increasing to the final values (as training loss starts leveling off).
 
-## Generating
+## Using a trained model
 
 Once trained, point the path in `decoder.py` to the subdirectory with the saved weights (the `train` directory in the log directory specified during training). Also update the hyperparameter values in that file to match those for the current model. Calling `generate_summary` returns the summary for a given document.
 
 # Experiments
 
-Below is a list of ideas I attempted (again as of 8/7/17):
+Below is a list of ideas I attempted (again as of 8/29/17):
 
 - Use pretrained word embeddings
 - Create different input tokens for entities
@@ -83,10 +87,12 @@ Below is a list of ideas I attempted (again as of 8/7/17):
 - Prevent copying non-entity words from the input
 - Utilize cables for training data
 - Ignore UNK tokens for training loss
-- Two layer encoder
+- Two layer LSTMs for encoder + decoder
 - Penalty for high attention on non-entity words
 - Restrict attention to entities
 - Penalty for generating the same word you're attending to
+- Sum-of-squared-probability loss across vocabulary, to discourage high probabilities for incorrect tokens
+- Squared-log-prob loss
 
 See flags in `run_summarization.py` for how to enable these, as well as default parameters to see the (approximately best settings I found).
 
