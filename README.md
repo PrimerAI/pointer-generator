@@ -1,4 +1,4 @@
-This repository contains code for experimenting with seq-to-seq summarization models. It is inititally based off of https://github.com/abisee/pointer-generator (corresponding paper is at https://arxiv.org/abs/1704.04368). The code uses Tensorflow 1.1.
+This repository contains code for experimenting with seq-to-seq summarization models. It is inititally based off of https://github.com/abisee/pointer-generator (corresponding paper is at https://arxiv.org/abs/1704.04368). The code uses Tensorflow 1.1.0.
 
 # Code organization
 
@@ -34,6 +34,12 @@ Here are the key files in the project:
 
 ## Dataset
 
+### Full dataset
+
+For the data set used to train the current model in `model_parameters`, see the AWS bucket s3://primerdev-git-bigstore/data/text-summarization.
+
+### Regenerating the dataset
+
 Get the CNN / Dailymail data set from http://cs.nyu.edu/~kcho/DMQA/. (ask about new cables if interested). Training is about 10 times faster on GPU - to set up an AWS instance with GPU, see https://primer.atlassian.net/wiki/spaces/DEVOPS/pages/10686621/CloudFormation+Stacks+at+Primer#CloudFormationStacksatPrimer-CreateaDeepLearningSimpleInstanceStack.
 
 Run `python make_datafiles.py <data_dir> <output_dir> <n_workers>`, where data_dir contains the directories with the CNN / Dailymail / new cables data, containing one file per document. The script will use Spacy and SpacyPeopleResolver to tokenize and label the articles into output subdirectories for each data set, also one file per document. Finally, we care about the `finished_files` directory which has:
@@ -65,6 +71,8 @@ Training can take between half a day to three days (or more!) depending on the c
 ## Using a trained model
 
 Once trained, point the path in `decoder.py` to the subdirectory with the saved weights (the `train` directory in the log directory specified during training). Also update the hyperparameter values in that file to match those for the current model. Calling `generate_summary` returns the summary for a given document.
+
+If you trained in Tensorflow version <= 1.1 (as found in AWS P2 instances), but want to use the model with Tensorflow version > 1.1, you will need to use the `checkpoint_convert.py` script to convert the model.
 
 # Experiments
 
