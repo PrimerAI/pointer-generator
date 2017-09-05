@@ -1,3 +1,5 @@
+# This repository has been ported to primer-core/primer_core/nlp/summary/seq2seq/training
+
 This repository contains code for experimenting with seq-to-seq summarization models. It is inititally based off of https://github.com/abisee/pointer-generator (corresponding paper is at https://arxiv.org/abs/1704.04368). The code uses Tensorflow 1.1.0.
 
 # Code organization
