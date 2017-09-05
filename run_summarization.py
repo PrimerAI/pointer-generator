@@ -222,7 +222,7 @@ def run_training(model, batcher, sess_context_manager, sv, summary_writer):
     """
     tf.logging.info("starting run_training")
     with sess_context_manager as sess:
-        for i in range(200):
+        while True: # repeats until interrupted
             batch = batcher.next_batch()
 
             tf.logging.info('running training step...')
